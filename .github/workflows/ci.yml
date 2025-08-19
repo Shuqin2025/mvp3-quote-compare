@@ -1,0 +1,21 @@
+
+name: CI
+on:
+  push: { branches: [ main ] }
+  pull_request: { branches: [ main ] }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Backend quick check
+        working-directory: backend
+        run: |
+          npm ci || npm install
+          node -v
+          node -e "console.log('backend ok')"
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm ci || npm install
+          npm run build

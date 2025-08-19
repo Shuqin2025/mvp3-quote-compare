@@ -1,3 +1,4 @@
+// Mock crawler: replace with real extraction when ready.
 export async function crawlProducts(url) {
   return [{
     name: `Product from ${url}`,

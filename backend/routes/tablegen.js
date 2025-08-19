@@ -22,16 +22,12 @@ router.post('/tablegen', async (req, res) => {
       products.push(...p)
     }
 
-    // translate headers (stubbed) and map rows
     const translatedHeaders = await translate(fields, lang)
     const translatedProducts = await Promise.all(products.map(async (p) => {
       const np = {}
       for (const f of fields) {
-        if (f === 'description') {
-          np[f] = await translate(p[f] || '', lang)
-        } else {
-          np[f] = p[f] ?? ''
-        }
+        if (f === 'description') np[f] = await translate(p[f] || '', lang)
+        else np[f] = p[f] ?? ''
       }
       if (fields.includes('imageUrl')) np.imageUrl = p.imageUrl
       return np
@@ -40,33 +36,26 @@ router.post('/tablegen', async (req, res) => {
     const filesDir = path.join(__dirname, '..', 'files')
     if (!fs.existsSync(filesDir)) fs.mkdirSync(filesDir)
 
-    const timestamp = Date.now()
+    const ts = Date.now()
     let excelUrl=null, pdfUrl=null, excelSize=null, pdfSize=null
 
     if (format.includes('excel')) {
-      const excelPath = path.join(filesDir, `tablegen_${timestamp}.xlsx`)
+      const excelPath = path.join(filesDir, `tablegen_${ts}.xlsx`)
       await genExcel(excelPath, translatedHeaders, translatedProducts)
-      excelUrl = `${process.env.BASE_URL or ''}/files/${path.basename(excelPath)}`
-      excelSize = f"{os.path.getsize(excelPath)/1024:.1f} KB" if False else None
-      try:
-        excelSize = f"{(os.path.getsize(excelPath)/1024):.1f} KB"
-      except Exception:
-        pass
+      excelUrl = `${process.env.BASE_URL || ''}/files/${path.basename(excelPath)}`
+      excelSize = `${(fs.statSync(excelPath).size/1024).toFixed(1)} KB`
     }
     if (format.includes('pdf')) {
-      const pdfPath = path.join(filesDir, `tablegen_${timestamp}.pdf`)
+      const pdfPath = path.join(filesDir, `tablegen_${ts}.pdf`)
       await genPdf(pdfPath, translatedHeaders, translatedProducts)
-      pdfUrl = `${process.env.BASE_URL or ''}/files/${path.basename(pdfPath)}`
-      try:
-        pdfSize = f"{(os.path.getsize(pdfPath)/1024):.1f} KB"
-      except Exception:
-        pass
+      pdfUrl = `${process.env.BASE_URL || ''}/files/${path.basename(pdfPath)}`
+      pdfSize = `${(fs.statSync(pdfPath).size/1024).toFixed(1)} KB`
     }
 
     return res.json({ excel: excelUrl, excelSize, pdf: pdfUrl, pdfSize })
   } catch (e) {
     console.error(e)
-    return res.status(500).json({ error: { message: e.message or 'server error' } })
+    return res.status(500).json({ error: { message: e.message || 'server error' } })
   }
 })
 
