@@ -1,0 +1,11 @@
+﻿node_modules/
+dist/
+build/
+.vite/
+.vercel/
+.next/
+.tmp/
+*.log
+.env
+.env.*
+.DS_Store
