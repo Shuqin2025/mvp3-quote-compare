@@ -1,82 +1,46 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
-/**
- * MVP3 完整版 App.jsx
- * - 健康检查
- * - 生成 PDF
- * - 网页抓取 + 一键回填
- * - 预热后端 + 指数退避重试，避免 Render 冷启动 5xx
- */
-
-// ====== 读取后端基址 ======
-const API =
-  import.meta.env.VITE_API_BASE || "https://yunivera-mvp2.onrender.com/v1/api";
-
-// ====== 工具：预热后端（冷启动常用） ======
-async function warmUp() {
-  try {
-    await fetch(`${API}/health`, { method: "GET", mode: "cors" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ====== 工具：带指数退避重试的 GET JSON ======
-async function getJSONWithRetry(url, { retries = 3, baseDelay = 600 } = {}) {
-  let lastErr;
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(url, { method: "GET", mode: "cors" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    } catch (e) {
-      lastErr = e;
-      // 退避等待后再试
-      await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, i)));
-    }
-  }
-  throw lastErr;
-}
-
-// 小工具：确保输入的 URL 含协议
-const ensureHttpUrl = (u) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
+const SCRAPE_API = import.meta.env.VITE_SCRAPE_API; // 👉 yunivera-mvp2/v1/api
+const PDF_API    = import.meta.env.VITE_PDF_API;    // 👉 mvp3-quote-compare-backend
 
 export default function App() {
-  // ====== PDF 表单 ======
-  const [title, setTitle] = useState("测试报价单");
-  const [content, setContent] = useState("这是由前端调用后端 /v1/api/pdf 生成的 PDF，支持中文。");
+  const titleRef = useRef(null);
+  const contentRef = useRef(null);
+  const scrapeInputRef = useRef(null);
 
-  // ====== 抓取 & 回填 ======
-  const [fastUrl, setFastUrl] = useState("https://example.com"); // 一键回填输入框
-  const [scrapeUrl, setScrapeUrl] = useState("https://example.com"); // 纯 Demo 输入框
-  const [scrapeResult, setScrapeResult] = useState(""); // 展示抓取 JSON
+  const [pingMsg, setPingMsg] = useState("后端健康检查中...");
+  const [scrapeLog, setScrapeLog] = useState("");
 
-  // ====== 健康检查提示（可选：页面加载就预热一次） ======
-  const [bootNote, setBootNote] = useState("（如在唤醒后端，可能要 20–60 秒）");
+  // 启动时分别 PING 两个后端
   useEffect(() => {
-    // 页面初始轻量预热（不阻塞）
-    warmUp().then(() => setBootNote(""));
+    (async () => {
+      try {
+        // 1) PING 抓取后端
+        const r1 = await fetch(`${SCRAPE_API}/health`, { method: "GET", mode: "cors" });
+        const t1 = await r1.json().catch(() => ({}));
+        // 2) PING PDF 后端
+        const r2 = await fetch(`${PDF_API}/health`, { method: "GET", mode: "cors" });
+        const t2 = await r2.json().catch(() => ({}));
+
+        setPingMsg(
+          `[PING] 抓取=${r1.status} ${t1.ok ? "OK" : ""} | PDF=${r2.status} ${t2.ok ? "OK" : ""}`
+        );
+      } catch (err) {
+        setPingMsg(`[PING] 失败：${err.message}`);
+        alert(`[PING] 失败：${err.message}`);
+      }
+    })();
   }, []);
 
-  // ====== 按钮：后端健康检查 ======
-  async function handlePing() {
+  // 生成 PDF（走 PDF_API）
+  async function handleMakePdf() {
     try {
-      const r = await fetch(`${API}/health`, { method: "GET", mode: "cors" });
-      const j = await r.json().catch(() => ({}));
-      alert(`[PING] ${JSON.stringify(j)}`);
-    } catch (e) {
-      alert(`[PING] 失败：${e.message}`);
-    }
-  }
+      const title = titleRef.current.value.trim();
+      const content = contentRef.current.value.trim();
+      if (!title) return alert("请填写标题");
+      if (!content) return alert("请填写正文");
 
-  // ====== 按钮：生成 PDF ======
-  async function handleGeneratePdf() {
-    try {
-      // 先预热
-      await warmUp();
-
-      const res = await fetch(`${API}/pdf`, {
+      const res = await fetch(`${PDF_API}/pdf`, {
         method: "POST",
         mode: "cors",
         headers: { "Content-Type": "application/json" },
@@ -84,164 +48,143 @@ export default function App() {
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "quote.pdf";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-
-      // 也可以在页面上提示
-      // alert("PDF 已生成并下载。");
-    } catch (e) {
-      alert(`生成失败：${e.message}`);
+      // PDF 后端通常返回 { ok: true, url: "..." } 或 Blob；这里演示两种兼容：
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const data = await res.json();
+        if (data.url) window.open(data.url, "_blank");
+        else alert(`已生成：${JSON.stringify(data)}`);
+      } else {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "quote.pdf";
+        a.click();
+        URL.revokeObjectURL(url);
+        alert("PDF 已生成并下载。");
+      }
+    } catch (err) {
+      alert(`生成失败： ${err.message}`);
     }
   }
 
-  // ====== 按钮：抓取（演示 + 在下方输出 JSON） ======
-  async function handleScrapeDemo() {
-    const raw = (scrapeUrl || "").trim();
-    if (!raw) {
-      alert("请输入网址");
-      return;
-    }
-
-    setScrapeResult(`⏳ 正在唤醒后端...`);
-    await warmUp();
-
-    const target = ensureHttpUrl(raw);
-    const reqUrl = `${API}/scrape?url=${encodeURIComponent(target)}`;
-    setScrapeResult(`⏳ 抓取中...\nGET ${reqUrl}`);
-
+  // 基础抓取 Demo（展示在下方日志）
+  async function handleScrapeSimple() {
+    const raw = scrapeInputRef.current.value.trim();
+    if (!raw) return;
+    setScrapeLog("⏳ 抓取中...");
     try {
-      const data = await getJSONWithRetry(reqUrl, { retries: 3, baseDelay: 800 });
-      setScrapeResult(
-        `Title: ${data.title}\n描述: ${data.description || "(无)"}\nH1: ${
-          data.h1?.join(" | ") || "(无)"
-        }\n来源: ${data.url}\n\n完整数据:\n` + JSON.stringify(data, null, 2)
-      );
-    } catch (e) {
-      alert(`抓取失败：${e.message}`);
-      setScrapeResult(`❌ 抓取失败：${e.message}\nURL = ${reqUrl}`);
+      const r = await fetch(`${SCRAPE_API}/scrape?url=${encodeURIComponent(raw)}`, {
+        method: "GET",
+        mode: "cors",
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      setScrapeLog(JSON.stringify(data, null, 2));
+    } catch (err) {
+      setScrapeLog(`❌ 抓取失败：${err.message}`);
     }
   }
 
-  // ====== 按钮：一键回填（把抓取结果写入标题 + 正文开头） ======
-  async function handleOneClickFill() {
-    const raw = (fastUrl || "").trim();
-    if (!raw) {
-      alert("请输入网址");
-      return;
-    }
-
-    await warmUp();
-
-    const target = ensureHttpUrl(raw);
-    const reqUrl = `${API}/scrape?url=${encodeURIComponent(target)}`;
-
+  // 一键回填（读取抓取结果的 title/desc/h1 回填到标题 + 正文）
+  async function handleScrapeAndFill() {
+    const raw = scrapeInputRef.current.value.trim();
+    if (!raw) return;
     try {
-      const data = await getJSONWithRetry(reqUrl, { retries: 3, baseDelay: 800 });
+      const r = await fetch(`${SCRAPE_API}/scrape?url=${encodeURIComponent(raw)}`, {
+        method: "GET",
+        mode: "cors",
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
 
-      // 回填标题（若抓到的 title 有值）
-      if (data.title) setTitle(data.title);
+      const title = (data.title || "").trim();
+      const desc  = (data.description || "").trim();
+      const h1s   = Array.isArray(data.h1) ? data.h1.join(" | ") : "";
 
-      // 组合一段摘要 + H1，写到正文开头
-      const lines = [];
-      if (data.description) lines.push(data.description);
-      if (data.h1?.length) lines.push("H1: " + data.h1.join(" | "));
-      const snippet = lines.length ? lines.join("\n") + "\n\n" : "";
+      // 回填
+      titleRef.current.value   = title || titleRef.current.value;
+      contentRef.current.value =
+        [desc && `摘要：${desc}`, h1s && `H1：${h1s}`]
+          .filter(Boolean)
+          .join("\n");
 
-      setContent((prev) => (snippet ? snippet + prev : prev));
-
-      alert("已回填抓取结果");
-    } catch (e) {
-      alert(`一键回填失败：${e.message}`);
+      alert("一键回填完成！");
+    } catch (err) {
+      alert(`一键回填失败： ${err.message}`);
     }
   }
 
   return (
-    <div style={{ padding: "14px", fontFamily: "sans-serif" }}>
+    <div style={{ padding: "12px", fontFamily: "sans-serif" }}>
       <h2>MVP3：前端调用 /v1/api/pdf + 抓取回填 Demo</h2>
 
-      {/* ====== PDF 生成区域 ====== */}
-      <div style={{ marginBottom: 16 }}>
-        <div>
-          <label>
-            标题：{" "}
-            <input
-              style={{ width: 320 }}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <div>
-          <label>正文：</label>
-          <br />
-          <textarea
-            style={{ width: 520, height: 120 }}
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-          />
-        </div>
-
-        <div style={{ margin: "8px 0" }}>
-          <button onClick={handlePing}>后端健康检查</button>{" "}
-          <button onClick={handleGeneratePdf}>生成 PDF</button>
-        </div>
-
-        <div style={{ color: "#666" }}>
-          API_BASE = <code>{API}</code>
-        </div>
+      <div style={{ margin: "8px 0", color: "#666" }}>
+        API_BASE = <code>{SCRAPE_API}</code>（抓取） | <code>{PDF_API}</code>（PDF）
       </div>
 
-      {/* ====== 抓取 & 一键回填 ====== */}
-      <div style={{ borderTop: "1px solid #ddd", paddingTop: 12, marginTop: 12 }}>
-        <h3>🔎 网页抓取 & 一键回填</h3>
-        <div style={{ marginBottom: 8 }}>
-          <input
-            id="scrape-fast-url"
-            style={{ width: 320 }}
-            value={fastUrl}
-            onChange={(e) => setFastUrl(e.target.value)}
-            placeholder="https://example.com"
-          />{" "}
-          <button onClick={handleOneClickFill}>回填</button>{" "}
-          <span style={{ color: "#999" }}>{bootNote}</span>
-        </div>
+      <div style={{ marginBottom: 8 }}>
+        <label>标题：</label>
+        <input ref={titleRef} defaultValue="测试报价单" style={{ width: 300 }} />
       </div>
 
-      {/* ====== 纯抓取演示（下方显示 JSON） ====== */}
-      <div style={{ borderTop: "1px solid #eee", paddingTop: 12, marginTop: 12 }}>
-        <h3>🧪 网页抓取 Demo (/v1/api/scrape)</h3>
-        <div style={{ marginBottom: 8 }}>
-          <input
-            style={{ width: 520 }}
-            value={scrapeUrl}
-            onChange={(e) => setScrapeUrl(e.target.value)}
-            placeholder="https://example.com"
-          />{" "}
-          <button onClick={handleScrapeDemo}>抓取</button>
-        </div>
+      <div>
+        <label>正文：</label>
+        <br />
+        <textarea
+          ref={contentRef}
+          rows={7}
+          cols={60}
+          defaultValue="这是由前端调用后端 /v1/api/pdf 生成的 PDF，支持中文。"
+        />
+      </div>
 
-        <pre
-          id="scrape-result"
-          style={{
-            background: "#f8f8f8",
-            border: "1px solid #ddd",
-            minHeight: 160,
-            whiteSpace: "pre-wrap",
-            padding: 8,
+      <div style={{ margin: "8px 0" }}>
+        <button onClick={handleMakePdf}>生成 PDF</button>
+        <span style={{ marginLeft: 12, color: "#888" }}>{pingMsg}</span>
+      </div>
+
+      <hr />
+
+      <h3>🔍 网页抓取 & 一键回填</h3>
+      <div style={{ marginBottom: 8 }}>
+        <input
+          ref={scrapeInputRef}
+          defaultValue="https://example.com"
+          style={{ width: 300 }}
+        />
+        <button onClick={handleScrapeAndFill} style={{ marginLeft: 6 }}>
+          回填
+        </button>
+      </div>
+
+      <h3>🧪 网页抓取 Demo (/v1/api/scrape)</h3>
+      <div style={{ marginBottom: 8 }}>
+        <input defaultValue="https://example.com" id="demoUrl" style={{ width: 300 }} />
+        <button
+          onClick={() => {
+            const u = document.getElementById("demoUrl").value.trim();
+            if (!u) return;
+            scrapeInputRef.current.value = u;
+            handleScrapeSimple();
           }}
+          style={{ marginLeft: 6 }}
         >
-          {scrapeResult}
-        </pre>
+          抓取
+        </button>
       </div>
+      <pre
+        style={{
+          minHeight: 200,
+          background: "#f8f8f8",
+          padding: 8,
+          border: "1px solid #ddd",
+          overflowX: "auto",
+        }}
+      >
+        {scrapeLog}
+      </pre>
     </div>
   );
 }
