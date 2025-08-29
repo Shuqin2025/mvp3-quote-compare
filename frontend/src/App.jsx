@@ -1,6 +1,11 @@
 import React, { useState } from "react";
 
-const API = "https://mvp3-quote-compare-backend.onrender.com";
+// 统一：优先读环境变量 VITE_API_URL，没配就回退到 mvp2 后端域名
+const API =
+  (typeof import.meta !== "undefined" &&
+    import.meta.env &&
+    import.meta.env.VITE_API_URL) ||
+  "https://yunivera-mvp2.onrender.com";
 
 // 通用：带超时与重试的 JSON 请求
 async function fetchJSONWithRetry(url, init = {}, retries = 2, timeoutMs = 45000) {
@@ -14,7 +19,7 @@ async function fetchJSONWithRetry(url, init = {}, retries = 2, timeoutMs = 45000
       return await r.json();
     } catch (e) {
       if (attempt === retries) throw e;
-      await new Promise(res => setTimeout(res, 1500));
+      await new Promise((res) => setTimeout(res, 1500));
     }
   }
 }
@@ -26,7 +31,8 @@ export default function App() {
 
   async function checkHealth() {
     try {
-      const url = `${API}/v1/health?ts=${Date.now()}`;
+      // ✅ 改为 /v1/api/health
+      const url = `${API}/v1/api/health?ts=${Date.now()}`;
       setMsg("后端健康检查中……（如在唤醒后端，可能要 20–60 秒）");
       const json = await fetchJSONWithRetry(url, { method: "GET" }, 2, 45000);
       setMsg(`健康检查成功：${JSON.stringify(json)}`);
