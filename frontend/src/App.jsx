@@ -1,190 +1,201 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState, useEffect } from "react";
 
-const SCRAPE_API = import.meta.env.VITE_SCRAPE_API; // 👉 yunivera-mvp2/v1/api
-const PDF_API    = import.meta.env.VITE_PDF_API;    // 👉 mvp3-quote-compare-backend
+// ==== i18n（中/德） ====
+const I18N = {
+  zh: {
+    appTitle: "MVP3：抓取 + 回填 + 生成 PDF",
+    healthCheck: "后端健康检查",
+    generatePDF: "生成 PDF",
+    urlPlaceholder: "输入要抓取的 URL，例如 https://example.com",
+    scrape: "抓取",
+    fillTitle: "回填标题",
+    fillBody: "回填正文",
+    fillBoth: "标题+正文",
+    apiBase: "API 基址",
+    statusReady: "就绪。",
+    titleLabel: "标题：",
+    bodyLabel: "正文：",
+    scrapeAndFill: "网页抓取 & 一键回填",
+    scrapeDemo: "网页抓取 Demo (/v1/api/scrape)",
+  },
+  de: {
+    appTitle: "MVP3: Scrapen + Ausfüllen + PDF erzeugen",
+    healthCheck: "Backend-Gesundheitsprüfung",
+    generatePDF: "PDF erzeugen",
+    urlPlaceholder: "URL eingeben, z. B. https://example.com",
+    scrape: "Scrapen",
+    fillTitle: "Titel ausfüllen",
+    fillBody: "Text ausfüllen",
+    fillBoth: "Titel + Text",
+    apiBase: "API-Basis",
+    statusReady: "Bereit.",
+    titleLabel: "Titel:",
+    bodyLabel: "Text:",
+    scrapeAndFill: "Web-Scraping & Ein-Klick-Ausfüllen",
+    scrapeDemo: "Web-Scraping Demo (/v1/api/scrape)",
+  },
+};
+
+function detectLang() {
+  const saved = localStorage.getItem("lang");
+  if (saved) return saved;
+  const nav = (navigator.language || "zh").toLowerCase();
+  return nav.startsWith("de") ? "de" : "zh";
+}
 
 export default function App() {
-  const titleRef = useRef(null);
-  const contentRef = useRef(null);
-  const scrapeInputRef = useRef(null);
+  // 状态
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [status, setStatus] = useState("Ready.");
+  const [scrapeUrl, setScrapeUrl] = useState("https://example.com");
+  const [scrapeResult, setScrapeResult] = useState(null);
 
-  const [pingMsg, setPingMsg] = useState("后端健康检查中...");
-  const [scrapeLog, setScrapeLog] = useState("");
-
-  // 启动时分别 PING 两个后端
+  // 多语言状态
+  const [lang, setLang] = useState(detectLang());
+  const t = (k) => I18N[lang][k] || k;
   useEffect(() => {
-    (async () => {
-      try {
-        // 1) PING 抓取后端
-        const r1 = await fetch(`${SCRAPE_API}/health`, { method: "GET", mode: "cors" });
-        const t1 = await r1.json().catch(() => ({}));
-        // 2) PING PDF 后端
-        const r2 = await fetch(`${PDF_API}/health`, { method: "GET", mode: "cors" });
-        const t2 = await r2.json().catch(() => ({}));
+    document.documentElement.lang = lang;
+    localStorage.setItem("lang", lang);
+  }, [lang]);
 
-        setPingMsg(
-          `[PING] 抓取=${r1.status} ${t1.ok ? "OK" : ""} | PDF=${r2.status} ${t2.ok ? "OK" : ""}`
-        );
-      } catch (err) {
-        setPingMsg(`[PING] 失败：${err.message}`);
-        alert(`[PING] 失败：${err.message}`);
-      }
-    })();
-  }, []);
+  // API 地址
+  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/v1/api";
+  const PDF_API = import.meta.env.VITE_PDF_API || API_BASE;
 
-  // 生成 PDF（走 PDF_API）
-  async function handleMakePdf() {
+  // 健康检查
+  async function checkHealth() {
     try {
-      const title = titleRef.current.value.trim();
-      const content = contentRef.current.value.trim();
-      if (!title) return alert("请填写标题");
-      if (!content) return alert("请填写正文");
+      const res = await fetch(`${API_BASE}/health`);
+      const data = await res.json();
+      setStatus("✅ " + JSON.stringify(data));
+    } catch (e) {
+      setStatus("❌ Health failed: " + e.message);
+    }
+  }
 
+  // 生成 PDF
+  async function generatePDF() {
+    setStatus("⏳ 生成 PDF...");
+    try {
       const res = await fetch(`${PDF_API}/pdf`, {
         method: "POST",
-        mode: "cors",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, content }),
+        body: JSON.stringify({ title, content: body }),
       });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // PDF 后端通常返回 { ok: true, url: "..." } 或 Blob；这里演示两种兼容：
-      const ct = res.headers.get("content-type") || "";
-      if (ct.includes("application/json")) {
-        const data = await res.json();
-        if (data.url) window.open(data.url, "_blank");
-        else alert(`已生成：${JSON.stringify(data)}`);
-      } else {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "quote.pdf";
-        a.click();
-        URL.revokeObjectURL(url);
-        alert("PDF 已生成并下载。");
-      }
-    } catch (err) {
-      alert(`生成失败： ${err.message}`);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "quote.pdf";
+      a.click();
+      setStatus("✅ PDF 已生成");
+    } catch (e) {
+      setStatus("❌ PDF 失败: " + e.message);
     }
   }
 
-  // 基础抓取 Demo（展示在下方日志）
-  async function handleScrapeSimple() {
-    const raw = scrapeInputRef.current.value.trim();
-    if (!raw) return;
-    setScrapeLog("⏳ 抓取中...");
+  // 抓取
+  async function doScrape() {
+    setStatus("⏳ 抓取中...");
     try {
-      const r = await fetch(`${SCRAPE_API}/scrape?url=${encodeURIComponent(raw)}`, {
-        method: "GET",
-        mode: "cors",
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
-      setScrapeLog(JSON.stringify(data, null, 2));
-    } catch (err) {
-      setScrapeLog(`❌ 抓取失败：${err.message}`);
+      const res = await fetch(`${API_BASE}/scrape?url=${encodeURIComponent(scrapeUrl)}`);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      setScrapeResult(data);
+      setStatus("✅ 抓取成功");
+    } catch (e) {
+      setStatus("❌ 抓取失败: " + e.message);
     }
   }
 
-  // 一键回填（读取抓取结果的 title/desc/h1 回填到标题 + 正文）
-  async function handleScrapeAndFill() {
-    const raw = scrapeInputRef.current.value.trim();
-    if (!raw) return;
-    try {
-      const r = await fetch(`${SCRAPE_API}/scrape?url=${encodeURIComponent(raw)}`, {
-        method: "GET",
-        mode: "cors",
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
-
-      const title = (data.title || "").trim();
-      const desc  = (data.description || "").trim();
-      const h1s   = Array.isArray(data.h1) ? data.h1.join(" | ") : "";
-
-      // 回填
-      titleRef.current.value   = title || titleRef.current.value;
-      contentRef.current.value =
-        [desc && `摘要：${desc}`, h1s && `H1：${h1s}`]
-          .filter(Boolean)
-          .join("\n");
-
-      alert("一键回填完成！");
-    } catch (err) {
-      alert(`一键回填失败： ${err.message}`);
-    }
+  // 回填
+  function applyTitle() {
+    if (scrapeResult?.title) setTitle(scrapeResult.title);
+  }
+  function applyContent() {
+    if (scrapeResult?.description) setBody(scrapeResult.description);
+  }
+  function applyBoth() {
+    applyTitle();
+    applyContent();
   }
 
   return (
-    <div style={{ padding: "12px", fontFamily: "sans-serif" }}>
-      <h2>MVP3：前端调用 /v1/api/pdf + 抓取回填 Demo</h2>
-
-      <div style={{ margin: "8px 0", color: "#666" }}>
-        API_BASE = <code>{SCRAPE_API}</code>（抓取） | <code>{PDF_API}</code>（PDF）
-      </div>
-
-      <div style={{ marginBottom: 8 }}>
-        <label>标题：</label>
-        <input ref={titleRef} defaultValue="测试报价单" style={{ width: 300 }} />
-      </div>
-
-      <div>
-        <label>正文：</label>
-        <br />
-        <textarea
-          ref={contentRef}
-          rows={7}
-          cols={60}
-          defaultValue="这是由前端调用后端 /v1/api/pdf 生成的 PDF，支持中文。"
-        />
-      </div>
-
-      <div style={{ margin: "8px 0" }}>
-        <button onClick={handleMakePdf}>生成 PDF</button>
-        <span style={{ marginLeft: 12, color: "#888" }}>{pingMsg}</span>
-      </div>
-
-      <hr />
-
-      <h3>🔍 网页抓取 & 一键回填</h3>
-      <div style={{ marginBottom: 8 }}>
-        <input
-          ref={scrapeInputRef}
-          defaultValue="https://example.com"
-          style={{ width: 300 }}
-        />
-        <button onClick={handleScrapeAndFill} style={{ marginLeft: 6 }}>
-          回填
+    <div style={{ padding: 20, fontFamily: "sans-serif" }}>
+      {/* 语言切换器 */}
+      <div style={{ position: "fixed", top: 12, right: 12 }}>
+        <button onClick={() => setLang("zh")} disabled={lang === "zh"}>
+          中文
         </button>
-      </div>
-
-      <h3>🧪 网页抓取 Demo (/v1/api/scrape)</h3>
-      <div style={{ marginBottom: 8 }}>
-        <input defaultValue="https://example.com" id="demoUrl" style={{ width: 300 }} />
         <button
-          onClick={() => {
-            const u = document.getElementById("demoUrl").value.trim();
-            if (!u) return;
-            scrapeInputRef.current.value = u;
-            handleScrapeSimple();
-          }}
+          onClick={() => setLang("de")}
+          disabled={lang === "de"}
           style={{ marginLeft: 6 }}
         >
-          抓取
+          Deutsch
         </button>
       </div>
-      <pre
-        style={{
-          minHeight: 200,
-          background: "#f8f8f8",
-          padding: 8,
-          border: "1px solid #ddd",
-          overflowX: "auto",
-        }}
-      >
-        {scrapeLog}
-      </pre>
+
+      <h2>{t("appTitle")}</h2>
+
+      <div style={{ marginBottom: 12 }}>
+        <label>{t("titleLabel")}</label>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          style={{ width: "100%" }}
+        />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label>{t("bodyLabel")}</label>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={6}
+          style={{ width: "100%" }}
+        />
+      </div>
+
+      <button onClick={checkHealth}>{t("healthCheck")}</button>
+      <button onClick={generatePDF} style={{ marginLeft: 8 }}>
+        {t("generatePDF")}
+      </button>
+      <div style={{ marginTop: 10 }}>{status}</div>
+
+      <hr style={{ margin: "20px 0" }} />
+
+      <h3>{t("scrapeAndFill")}</h3>
+      <input
+        value={scrapeUrl}
+        onChange={(e) => setScrapeUrl(e.target.value)}
+        style={{ width: "60%" }}
+        placeholder={t("urlPlaceholder")}
+      />
+      <button onClick={doScrape} style={{ marginLeft: 8 }}>
+        {t("scrape")}
+      </button>
+
+      {scrapeResult && (
+        <div style={{ marginTop: 12, background: "#f9f9f9", padding: 10 }}>
+          <pre>{JSON.stringify(scrapeResult, null, 2)}</pre>
+          <div style={{ marginTop: 8 }}>
+            <button onClick={applyTitle}>{t("fillTitle")}</button>
+            <button onClick={applyContent} style={{ marginLeft: 6 }}>
+              {t("fillBody")}
+            </button>
+            <button onClick={applyBoth} style={{ marginLeft: 6 }}>
+              {t("fillBoth")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <hr style={{ margin: "20px 0" }} />
+      <div>
+        {t("apiBase")}: <code>{API_BASE}</code>
+      </div>
     </div>
   );
 }
