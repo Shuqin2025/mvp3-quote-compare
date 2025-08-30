@@ -268,11 +268,15 @@ export default function App() {
     }
   }
 
+  // ✅ 方案1：把抓取由 GET 改为 POST，与后端 /v1/api/scrape 的实现一致
   async function doScrape() {
     try {
       setScrapeJson("抓取中 / Scraping …");
-      // ✅ 修复：必须使用 /v1/api/scrape
-      const r = await fetch(`${API}/scrape?url=${encodeURIComponent(scrapeUrl)}`);
+      const r = await fetch(`${API}/scrape`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: scrapeUrl }),
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       setScrapeJson(JSON.stringify(data, null, 2));
