@@ -7,7 +7,6 @@ const API =
 
 /* ----------------------- 工具函数：解析 & 文本拼装 ----------------------- */
 
-// 将 HTML 变纯文本
 function stripTags(html = "") {
   try {
     const tmp = document.createElement("div");
@@ -17,20 +16,14 @@ function stripTags(html = "") {
     return html;
   }
 }
-
-// 统一小数点与千分位，返回数字字符串（不做 parseFloat，避免精度/格式丢失）
 function normalizeNumber(txt) {
   if (!txt) return "";
-  // 1.000,50 → 1000,50 → 1000.50
   const t = txt.trim();
   if (t.includes(".") && t.includes(",")) {
-    // 认为 . 为千分，, 为小数
     return t.replace(/\./g, "").replace(",", ".");
   }
-  // 1,000.50 → 1000.50
   return t.replace(/,/g, "");
 }
-
 function firstNonEmpty(...candidates) {
   for (const c of candidates) {
     if (Array.isArray(c) && c.length) return c[0];
@@ -38,11 +31,18 @@ function firstNonEmpty(...candidates) {
   }
   return "";
 }
+function glueScrapeText(scrape) {
+  const parts = [];
+  if (scrape?.title) parts.push(scrape.title);
+  if (Array.isArray(scrape?.h1)) parts.push(scrape.h1.join(" | "));
+  if (scrape?.description) parts.push(scrape.description);
+  if (scrape?.preview) parts.push(stripTags(scrape.preview));
+  return parts.filter(Boolean).join("\n");
+}
 
-// 价格/币种抽取（从已抓的 title/description/h1/preview 文本里找）
+/* -------- 通用启发式 -------- */
 function extractPriceCurrency(text) {
   const src = text || "";
-  // 形如：€ 12,34  /  12,34 €  /  USD 12.34  /  12.34 USD  /  ¥88  /  RMB 88
   const re =
     /(?:(€|EUR|USD|US\$|\$|GBP|£|CNY|RMB|¥)\s*([\d.,]+))|(?:([\d.,]+)\s*(€|EUR|USD|US\$|\$|GBP|£|CNY|RMB|¥))/i;
   const m = src.match(re);
@@ -56,22 +56,17 @@ function extractPriceCurrency(text) {
     currency = m[4].toUpperCase();
     price = normalizeNumber(m[3]);
   }
-  // 归一化币种显示
   const map = { "US$": "USD", $: "USD", "€": "EUR", "£": "GBP", "¥": "CNY", RMB: "CNY" };
   currency = map[currency] || currency;
   return { price, currency };
 }
-
-// SKU 抽取
 function extractSKU(text) {
   const re =
-    /(SKU|Artikel(?:\-?Nr\.?)?|Artikelnummer|型[号號]|货号|款号|型号)\s*[:#]?\s*([A-Za-z0-9\-\._\/]+)/i;
+    /(ASIN|SKU|Artikel(?:\-?Nr\.?)?|Artikelnummer|型[号號]|货号|款号|型号|EAN)\s*[:#]?\s*([A-Za-z0-9\-\._\/]{4,})/i;
   const m = (text || "").match(re);
   if (!m) return null;
   return m[2];
 }
-
-// MOQ 抽取
 function extractMOQ(text) {
   const re =
     /(MOQ|最小起订|起订量|起订|Mindestbestellmenge|Mind\.?\s?Bestellmenge|Min\.?\s?Order)\s*[:#]?\s*(\d+)/i;
@@ -79,18 +74,6 @@ function extractMOQ(text) {
   if (!m) return null;
   return m[2];
 }
-
-// 将抓取 JSON 中的若干字段拼为「可被抽取」的大文本
-function glueScrapeText(scrape) {
-  const parts = [];
-  if (scrape?.title) parts.push(scrape.title);
-  if (Array.isArray(scrape?.h1)) parts.push(scrape.h1.join(" | "));
-  if (scrape?.description) parts.push(scrape.description);
-  if (scrape?.preview) parts.push(stripTags(scrape.preview));
-  return parts.filter(Boolean).join("\n");
-}
-
-// 生成报价正文（中/德/英三语混排），你也可以改成只输出某一种语言
 function buildQuoteText({ name, sku, price, currency, moq, url }) {
   const cn = [
     "【基本信息】",
@@ -140,21 +123,106 @@ function buildQuoteText({ name, sku, price, currency, moq, url }) {
   return `${cn}\n\n${de}\n\n${en}`;
 }
 
+/* ----------------------- 站点优先规则 ----------------------- */
+
+function hostOf(urlStr) {
+  try {
+    return new URL(urlStr).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function extractBySite(host, plainText) {
+  const t = plainText || "";
+  const out = { price: null, currency: null, sku: null, moq: null };
+
+  // 1) 1688（detail.1688.com/offer/...）
+  if (/1688\.com$|\.1688\.com$/.test(host)) {
+    // ¥ / ￥ / RMB
+    const mPrice =
+      t.match(/(¥|￥|RMB|CNY)\s*([\d.,]+)/i) || t.match(/([\d.,]+)\s*(¥|￥|RMB|CNY)/i);
+    if (mPrice) {
+      const isLeading = /^(¥|￥|RMB|CNY)/i.test(mPrice[0]);
+      out.currency = "CNY";
+      out.price = normalizeNumber(isLeading ? mPrice[2] : mPrice[1]);
+    }
+    // 起订量 / 起订 / 最小起订
+    const mMoq = t.match(/(起订量|起订|最小起订)\s*[:：]?\s*(\d+)/);
+    if (mMoq) out.moq = mMoq[2];
+    const mSku =
+      t.match(/(货号|型号|款号|SKU)\s*[:：#]?\s*([A-Za-z0-9\-\._\/]{3,})/) ||
+      t.match(/Artikel(?:\-?Nr\.?|nummer)\s*[:#]?\s*([A-Za-z0-9\-\._\/]{3,})/i);
+    if (mSku) out.sku = mSku[2] || mSku[1];
+  }
+
+  // 2) Alibaba（product-detail … ；常见 “Min. Order / MOQ”）
+  else if (/alibaba\.com$|\.alibaba\.com$/.test(host)) {
+    const mPrice =
+      t.match(/(US\$|\$|USD|€|EUR|£|GBP|¥|CNY|RMB)\s*([\d.,]+)/i) ||
+      t.match(/([\d.,]+)\s*(US\$|\$|USD|€|EUR|£|GBP|¥|CNY|RMB)/i);
+    if (mPrice) {
+      let cur = (mPrice[1] || mPrice[3] || "").toUpperCase();
+      const map = { "US$": "USD", $: "USD", "€": "EUR", "£": "GBP", "¥": "CNY", RMB: "CNY" };
+      out.currency = map[cur] || cur;
+      out.price = normalizeNumber(mPrice[2] || mPrice[1]);
+    }
+    const mMoq = t.match(/(MOQ|Min\.?\s?Order)\s*[:#]?\s*(\d+)/i);
+    if (mMoq) out.moq = mMoq[2];
+    const mSku = t.match(/(SKU|Model|Artikel(?:\-?Nr\.?)?)\s*[:#]?\s*([A-Za-z0-9\-\._\/]{3,})/i);
+    if (mSku) out.sku = mSku[2];
+  }
+
+  // 3) Amazon（dp/...；ASIN、$ / €）
+  else if (/amazon\./.test(host)) {
+    const mPrice =
+      t.match(/(€|EUR|\$|USD|£|GBP)\s*([\d.,]+)/i) ||
+      t.match(/([\d.,]+)\s*(€|EUR|\$|USD|£|GBP)/i);
+    if (mPrice) {
+      let cur = (mPrice[1] || mPrice[3] || "").toUpperCase();
+      const map = { $: "USD", "€": "EUR", "£": "GBP" };
+      out.currency = map[cur] || cur;
+      out.price = normalizeNumber(mPrice[2] || mPrice[1]);
+    }
+    const mAsin = t.match(/ASIN\s*[:：]\s*([A-Z0-9]{10})/i);
+    if (mAsin) out.sku = mAsin[1];
+  }
+
+  // 4) OTTO（德语电商，常见 “Artikelnummer”）
+  else if (/otto\.de$|\.otto\.de$/.test(host)) {
+    const mPrice = t.match(/([\d.,]+)\s*(€|EUR)/i) || t.match(/(€|EUR)\s*([\d.,]+)/i);
+    if (mPrice) {
+      out.currency = "EUR";
+      out.price = normalizeNumber(mPrice[1] || mPrice[2]);
+    }
+    const mSku = t.match(/Artikelnummer\s*[:#]?\s*([A-Za-z0-9\-\._\/]{3,})/i);
+    if (mSku) out.sku = mSku[1];
+  }
+
+  // 5) Hornbach（德建材零售，常见 “Artikelnummer / Art.-Nr.”）
+  else if (/hornbach\.de$|\.hornbach\.de$/.test(host)) {
+    const mPrice = t.match(/([\d.,]+)\s*(€|EUR)/i) || t.match(/(€|EUR)\s*([\d.,]+)/i);
+    if (mPrice) {
+      out.currency = "EUR";
+      out.price = normalizeNumber(mPrice[1] || mPrice[2]);
+    }
+    const mSku =
+      t.match(/(Artikelnummer|Art\.?\-?Nr\.?)\s*[:#]?\s*([A-Za-z0-9\-\._\/]{3,})/i);
+    if (mSku) out.sku = mSku[2];
+  }
+
+  return out;
+}
+
 /* ----------------------- 页面组件 ----------------------- */
 
 export default function App() {
-  // 顶部：标题 & 正文
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
-
-  // 健康检查
   const [healthMsg, setHealthMsg] = useState("Bereit. / 就绪。");
   const [pinging, setPinging] = useState(false);
-
-  // 生成 PDF
   const [pdfLoading, setPdfLoading] = useState(false);
 
-  // 简易抓取 + 结果
   const [scrapeUrl, setScrapeUrl] = useState("https://example.com");
   const [scrapeJson, setScrapeJson] = useState("");
 
@@ -221,7 +289,6 @@ export default function App() {
     }
   }
 
-  // 旧版回填：仅把 title/h1/字数拼到正文
   function fillFromScrapeSimple() {
     try {
       const data = JSON.parse(scrapeJson);
@@ -236,20 +303,29 @@ export default function App() {
     }
   }
 
-  // 新增：智能回填（抽取 price / currency / sku / moq）
+  // 智能回填（站点优先规则 + 通用启发式补全）
   function fillFromScrapeSmart() {
     try {
       const data = JSON.parse(scrapeJson);
       const name = firstNonEmpty(data?.title, data?.h1);
       const rawText = glueScrapeText(data);
-      const { price, currency } = extractPriceCurrency(rawText);
-      const sku = extractSKU(rawText);
-      const moq = extractMOQ(rawText);
+      const host = hostOf(data?.url || scrapeUrl);
 
-      // 标题：优先取抓到的 title/h1
+      // 先用站点规则
+      const site = extractBySite(host, rawText);
+
+      // 通用兜底（只填缺失项）
+      const generic = extractPriceCurrency(rawText);
+      const skuGen = extractSKU(rawText);
+      const moqGen = extractMOQ(rawText);
+
+      const price = site.price || generic.price;
+      const currency = site.currency || generic.currency;
+      const sku = site.sku || skuGen;
+      const moq = site.moq || moqGen;
+
       if (name) setTitle(name);
 
-      // 拼装正文（三语）
       const body = buildQuoteText({
         name,
         sku,
@@ -260,7 +336,7 @@ export default function App() {
       });
 
       setText(body);
-      alert("已智能回填（含价格/币种/SKU/MOQ）。请检查后直接生成 PDF。");
+      alert(`已智能回填（站点：${host || "未知"}）。请检查后直接生成 PDF。`);
     } catch (e) {
       console.error(e);
       alert("当前抓取数据不是 JSON，或无法解析。请先确保抓取成功再试。");
@@ -271,7 +347,6 @@ export default function App() {
     <div style={{ fontFamily: "system-ui, Arial, sans-serif", maxWidth: 980, margin: "20px auto" }}>
       <h2>MVP3：Scrapen + Ausfüllen + PDF erzeugen</h2>
 
-      {/* 标题 & 正文 */}
       <div style={{ marginBottom: 12 }}>
         <div style={{ marginBottom: 6 }}>
           <label>
@@ -315,7 +390,6 @@ export default function App() {
 
       <hr style={{ margin: "18px 0" }} />
 
-      {/* 抓取区 */}
       <h3>🔎 Web-Scraping & 一键回填</h3>
       <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <input
