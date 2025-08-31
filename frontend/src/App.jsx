@@ -1,4 +1,5 @@
 // frontend/src/App.jsx
+
 import React, { useState } from "react";
 
 /** 后端 API 基址（优先读 .env 的 VITE_API_BASE，末尾斜杠自动移除） */
@@ -38,6 +39,31 @@ function glueScrapeText(scrape) {
   if (scrape?.description) parts.push(scrape.description);
   if (scrape?.preview) parts.push(stripTags(scrape.preview));
   return parts.filter(Boolean).join("\n");
+}
+
+/** ✨把 textarea 文本转换为 PDF 接口需要的 rows（二维数组） */
+function buildRowsFromText(text) {
+  // 先按空行切“段落”，段落里再按换行切“行”
+  const paragraphs = (text || "")
+    .split(/\n\s*\n/g)
+    .map((p) => p.split(/\n/g).map((s) => s.trim()).filter(Boolean))
+    .filter((arr) => arr.length);
+
+  // 后端最安全的兜底格式：二维数组、每一行就是一个单元格
+  const rows = [];
+  if (paragraphs.length === 0) {
+    rows.push(["(空白)"]);
+  } else {
+    for (const para of paragraphs) {
+      for (const line of para) rows.push([line]);
+      // 段落之间加一条空行（视觉留白）
+      rows.push([""]);
+    }
+    // 去掉尾部空白行（若有）
+    while (rows.length && rows[rows.length - 1][0] === "") rows.pop();
+    if (!rows.length) rows.push(["(空白)"]);
+  }
+  return rows;
 }
 
 /* -------- 通用启发式：价格/币种、SKU、MOQ -------- */
@@ -232,6 +258,7 @@ export default function App() {
     }
   }
 
+  /** ✅ 修复：按 MVP2 后端要求提交 {title, rows} */
   async function generatePDF() {
     if (!title.trim() && !text.trim()) {
       alert("请先填写标题或正文（Title / Text）");
@@ -239,14 +266,19 @@ export default function App() {
     }
     try {
       setPdfLoading(true);
+
+      // 把正文转换成 rows（二维数组）；最少保证 1 行
+      const rows = buildRowsFromText(text || title || "(空白)");
+
       const r = await fetch(`${API}/pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title || "报价单 / Quote",
-          content: text || "(正文为空)",
+          rows, // 👈 关键：后端需要 rows，避免 ROWS_REQUIRED
         }),
       });
+
       if (!r.ok) {
         const msg = await r.text().catch(() => "");
         throw new Error(`HTTP ${r.status} ${msg || ""}`.trim());
@@ -268,7 +300,7 @@ export default function App() {
     }
   }
 
-  // ✅ 方案1：把抓取由 GET 改为 POST，与后端 /v1/api/scrape 的实现一致
+  // 抓取改为 POST，与后端一致
   async function doScrape() {
     try {
       setScrapeJson("抓取中 / Scraping …");
