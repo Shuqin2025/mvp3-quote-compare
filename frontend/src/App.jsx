@@ -1,5 +1,4 @@
 // frontend/src/App.jsx
-
 import React, { useState } from "react";
 
 /** 后端 API 基址（优先读 .env 的 VITE_API_BASE，末尾斜杠自动移除） */
@@ -43,23 +42,19 @@ function glueScrapeText(scrape) {
 
 /** ✨把 textarea 文本转换为 PDF 接口需要的 rows（二维数组） */
 function buildRowsFromText(text) {
-  // 先按空行切“段落”，段落里再按换行切“行”
   const paragraphs = (text || "")
     .split(/\n\s*\n/g)
     .map((p) => p.split(/\n/g).map((s) => s.trim()).filter(Boolean))
     .filter((arr) => arr.length);
 
-  // 后端最安全的兜底格式：二维数组、每一行就是一个单元格
   const rows = [];
   if (paragraphs.length === 0) {
     rows.push(["(空白)"]);
   } else {
     for (const para of paragraphs) {
       for (const line of para) rows.push([line]);
-      // 段落之间加一条空行（视觉留白）
-      rows.push([""]);
+      rows.push([""]); // 段落间空行
     }
-    // 去掉尾部空白行（若有）
     while (rows.length && rows[rows.length - 1][0] === "") rows.pop();
     if (!rows.length) rows.push(["(空白)"]);
   }
@@ -258,7 +253,7 @@ export default function App() {
     }
   }
 
-  /** ✅ 修复：按 MVP2 后端要求提交 {title, rows} */
+  /** ✅ 修复：按后端要求提交 {title, rows}，并兼容两种返回 */
   async function generatePDF() {
     if (!title.trim() && !text.trim()) {
       alert("请先填写标题或正文（Title / Text）");
@@ -267,7 +262,6 @@ export default function App() {
     try {
       setPdfLoading(true);
 
-      // 把正文转换成 rows（二维数组）；最少保证 1 行
       const rows = buildRowsFromText(text || title || "(空白)");
 
       const r = await fetch(`${API}/pdf`, {
@@ -275,23 +269,40 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title || "报价单 / Quote",
-          rows, // 👈 关键：后端需要 rows，避免 ROWS_REQUIRED
+          rows,
         }),
       });
 
-      if (!r.ok) {
-        const msg = await r.text().catch(() => "");
-        throw new Error(`HTTP ${r.status} ${msg || ""}`.trim());
+      // ① 直接返回 PDF（二进制）
+      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      if (r.ok && ct.includes("application/pdf")) {
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "quote.pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return;
       }
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "quote.pdf";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+
+      // ② 返回 JSON（可能含 file 路径）
+      const txt = await r.text(); // 先拿文本，便于调试
+      let data = {};
+      try { data = JSON.parse(txt); } catch {}
+
+      if (r.ok && data?.ok && data?.file) {
+        // /files/xxx.pdf 在后端根域名下
+        const origin = API.replace(/\/v1\/api$/, "");
+        const fileUrl = new URL(data.file, origin).toString();
+        window.location.href = fileUrl; // 触发下载
+        return;
+      }
+
+      // 其他情况：报错
+      throw new Error(`HTTP ${r.status} ${txt || ""}`.trim());
     } catch (e) {
       alert(`PDF 失败：${e?.message || e}`);
       console.error(e);
@@ -300,7 +311,7 @@ export default function App() {
     }
   }
 
-  // 抓取改为 POST，与后端一致
+  // 抓取：与后端一致使用 POST
   async function doScrape() {
     try {
       setScrapeJson("抓取中 / Scraping …");
@@ -435,4 +446,3 @@ export default function App() {
     </div>
   );
 }
-
