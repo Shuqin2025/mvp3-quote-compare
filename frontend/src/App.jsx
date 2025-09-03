@@ -253,7 +253,7 @@ export default function App() {
     }
   }
 
-  /** ✅ 修复：按后端要求提交 {title, rows}，并兼容两种返回 */
+  /** ✅ 生成 PDF：按后端要求提交 { title, rows }；兼容二进制/JSON 两种返回 */
   async function generatePDF() {
     if (!title.trim() && !text.trim()) {
       alert("请先填写标题或正文（Title / Text）");
@@ -291,8 +291,9 @@ export default function App() {
       // ② 返回 JSON（可能含 file 路径）
       const txt = await r.text(); // 先拿文本，便于调试
       let data = {};
-      try { data = JSON.parse(txt); } catch {}
-
+      try {
+        data = JSON.parse(txt);
+      } catch {}
       if (r.ok && data?.ok && data?.file) {
         // /files/xxx.pdf 在后端根域名下
         const origin = API.replace(/\/v1\/api$/, "");
