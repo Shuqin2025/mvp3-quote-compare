@@ -253,7 +253,7 @@ export default function App() {
     }
   }
 
-  /** ✅ 生成 PDF：按后端要求提交 { title, rows }；兼容二进制/JSON 两种返回 */
+  /** ✅ 生成 PDF（双模兼容：先 rows，失败再 content） */
   async function generatePDF() {
     if (!title.trim() && !text.trim()) {
       alert("请先填写标题或正文（Title / Text）");
@@ -263,8 +263,8 @@ export default function App() {
       setPdfLoading(true);
 
       const rows = buildRowsFromText(text || title || "(空白)");
-
-      const r = await fetch(`${API}/pdf`, {
+      // —— 首次尝试：新接口 rows
+      let r = await fetch(`${API}/pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -274,7 +274,7 @@ export default function App() {
       });
 
       // ① 直接返回 PDF（二进制）
-      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      let ct = (r.headers.get("content-type") || "").toLowerCase();
       if (r.ok && ct.includes("application/pdf")) {
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
@@ -289,21 +289,66 @@ export default function App() {
       }
 
       // ② 返回 JSON（可能含 file 路径）
-      const txt = await r.text(); // 先拿文本，便于调试
+      let txtResp = await r.text();
       let data = {};
       try {
-        data = JSON.parse(txt);
+        data = JSON.parse(txtResp);
       } catch {}
+
+      // 如果 rows 方案失败，并且看到“需要 content/body”关键词，则自动 fallback
+      const needOldFormat =
+        !r.ok &&
+        /content|body/i.test(txtResp) &&
+        /(必填|缺失|required|missing)/i.test(txtResp);
+
+      if (needOldFormat) {
+        const r2 = await fetch(`${API}/pdf`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title || "报价单 / Quote",
+            content: (text || title || "").trim() || "（空白）",
+          }),
+        });
+
+        const ct2 = (r2.headers.get("content-type") || "").toLowerCase();
+        if (r2.ok && ct2.includes("application/pdf")) {
+          const blob = await r2.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "quote.pdf";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          return;
+        }
+
+        const txt2 = await r2.text();
+        let data2 = {};
+        try {
+          data2 = JSON.parse(txt2);
+        } catch {}
+        if (r2.ok && data2?.ok && data2?.file) {
+          const origin = API.replace(/\/v1\/api$/, "");
+          const fileUrl = new URL(data2.file, origin).toString();
+          window.location.href = fileUrl;
+          return;
+        }
+
+        throw new Error(`HTTP ${r2.status} ${txt2 || ""}`.trim());
+      }
+
       if (r.ok && data?.ok && data?.file) {
-        // /files/xxx.pdf 在后端根域名下
         const origin = API.replace(/\/v1\/api$/, "");
         const fileUrl = new URL(data.file, origin).toString();
-        window.location.href = fileUrl; // 触发下载
+        window.location.href = fileUrl;
         return;
       }
 
       // 其他情况：报错
-      throw new Error(`HTTP ${r.status} ${txt || ""}`.trim());
+      throw new Error(`HTTP ${r.status} ${txtResp || ""}`.trim());
     } catch (e) {
       alert(`PDF 失败：${e?.message || e}`);
       console.error(e);
