@@ -238,6 +238,10 @@ export default function App() {
   const [scrapeUrl, setScrapeUrl] = useState("https://example.com");
   const [scrapeJson, setScrapeJson] = useState("");
 
+  // 目录抓取（新增）
+  const [catalogUrl, setCatalogUrl] = useState("https://example.com");
+  const [catalogJson, setCatalogJson] = useState("");
+
   async function pingBackend() {
     try {
       setPinging(true);
@@ -416,6 +420,66 @@ export default function App() {
     }
   }
 
+  /* ============================ 目录抓取（/catalog/parse）============================ */
+  async function parseCatalog() {
+    try {
+      setCatalogJson("抓取目录中 …");
+      const r = await fetch(`${API}/catalog/parse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: catalogUrl }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+      setCatalogJson(JSON.stringify(data, null, 2));
+      alert(`目录抓取成功：共 ${data.count ?? data.products?.length ?? 0} 条`);
+    } catch (e) {
+      setCatalogJson(`❌ 目录抓取失败：${e?.message || e}`);
+    }
+  }
+
+  /** 把目录 JSON 转成简表文本，直接写入正文（随后点“生成 PDF”即可） */
+  function putCatalogIntoText(limit = 50) {
+    try {
+      const data = JSON.parse(catalogJson);
+      const list = Array.isArray(data?.products) ? data.products : [];
+      if (!list.length) {
+        alert("目录结果为空，无法生成表格。");
+        return;
+      }
+      const host = hostOf(data?.source || catalogUrl);
+      if (!title.trim()) {
+        // 用目录名当标题
+        const pathname = new URL(data?.source || catalogUrl).pathname.replace(/^\/+/, "");
+        setTitle(pathname ? `${pathname}` : `Catalog of ${host}`);
+      }
+
+      const rows = [
+        "【目录简表 | Preview】",
+        `来源：${data?.source || catalogUrl}`,
+        `总量：${data?.count ?? list.length}（下方仅展示前 ${Math.min(limit, list.length)} 条）`,
+        "",
+        "序号 | 名称 | 价格 | 货币 | URL",
+        "---- | ---- | ---- | ---- | ---",
+      ];
+
+      list.slice(0, limit).forEach((p, i) => {
+        const priceStr = p.price ? String(p.price) : "";
+        const currency = p.currency || "";
+        rows.push(
+          `${i + 1} | ${p.title || p.name || "(n/a)"} | ${priceStr || "-"} | ${currency || "-"} | ${p.url || "-"}`
+        );
+      });
+
+      const block = rows.join("\n");
+      setText((t) => (t ? `${t}\n\n${block}` : block));
+      alert(`已将目录简表写入正文（前 ${Math.min(limit, list.length)} 条）。请直接生成 PDF。`);
+    } catch (e) {
+      console.error(e);
+      alert("目录 JSON 解析失败，无法写入正文。");
+    }
+  }
+
   return (
     <div style={{ fontFamily: "system-ui, Arial, sans-serif", maxWidth: 980, margin: "20px auto" }}>
       <h2>MVP3：Scrapen + Ausfüllen + PDF erzeugen</h2>
@@ -442,7 +506,7 @@ export default function App() {
               onChange={(e) => setText(e.target.value)}
               rows={10}
               style={{ width: "100%", padding: 6, marginTop: 4 }}
-              placeholder="在此输入或使用下方『回填/智能回填』自动生成"
+              placeholder="在此输入或使用下方『回填/智能回填/目录简表』自动生成"
             />
           </label>
         </div>
@@ -488,6 +552,31 @@ export default function App() {
         value={scrapeJson}
         style={{ width: "100%", padding: 8, fontFamily: "ui-monospace, monospace" }}
         placeholder="抓取结果将显示在这里（JSON）"
+      />
+
+      <hr style={{ margin: "18px 0" }} />
+
+      {/* 目录抓取 & 生成简表（新增） */}
+      <h3>📚 目录抓取 Demo（/v1/api/catalog/parse）</h3>
+      <div style={{ display: "flex", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+        <input
+          value={catalogUrl}
+          onChange={(e) => setCatalogUrl(e.target.value)}
+          style={{ flex: 1, minWidth: 300, padding: 6 }}
+          placeholder="目录页 URL（例如某分类/搜索结果页）"
+        />
+        <button onClick={parseCatalog}>抓取目录</button>
+        <button onClick={() => putCatalogIntoText(50)} title="将目录前 N 条整理为简表写入正文，随后直接生成 PDF">
+          目录写入正文（前 50 条）
+        </button>
+      </div>
+
+      <textarea
+        rows={12}
+        readOnly
+        value={catalogJson}
+        style={{ width: "100%", padding: 8, fontFamily: "ui-monospace, monospace" }}
+        placeholder="目录抓取结果将显示在这里（JSON）"
       />
     </div>
   );
