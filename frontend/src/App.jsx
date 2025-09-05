@@ -1,14 +1,17 @@
 import React, { useMemo, useRef, useState } from "react";
 
 /**
- * MVP3 前端（还原版）— 去掉 1688/Amazon 专用功能
- * - 读取后端 API 基址：VITE_API_URL，默认回退 https://yunivera-mvp2.onrender.com
- * - /v1/api/health  健康检查
- * - /v1/api/pdf     生成 PDF（返回 application/pdf）
- * - /v1/api/scrape  单页抓取
+ * MVP3 前端（原版增强）
+ * - 读取后端 API 基址：VITE_API_URL（Render 环境变量），无则回退 fallbackAPI
+ * - /v1/api/health   健康检查
+ * - /v1/api/pdf      生成整页 PDF（application/pdf）
+ * - /v1/api/scrape   单页抓取
  * - /v1/api/catalog/parse  目录抓取
+ * - /v1/api/export/excel   导出 Excel（application/vnd.openxmlformats-officedocument.spreadsheetml.sheet）
+ * - /v1/api/export/table-pdf 导出表格 PDF（application/pdf）
  */
 
+// 仅兜底；实际通过 VITE_API_URL 指向你的新后端（yunivera-mvp2-cwyr.onrender.com）
 const fallbackAPI = "https://yunivera-mvp2.onrender.com";
 
 function App() {
@@ -37,7 +40,6 @@ function App() {
 
   const alertMsg = (msg) => {
     try {
-      // 兼容桌面浏览器
       window.alert(msg);
     } catch (e) {
       console.log(msg);
@@ -47,21 +49,15 @@ function App() {
   const fetchJson = async (path, payload) => {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload ?? {}),
     });
-    const ct = res.headers.get("content-type") || "";
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`HTTP ${res.status} - ${errText || "request failed"}`);
     }
-    if (ct.includes("application/json")) {
-      return res.json();
-    }
-    // 有些接口可能返回纯文本
-    return res.text();
+    const ct = res.headers.get("content-type") || "";
+    return ct.includes("application/json") ? res.json() : res.text();
   };
 
   const doHealthCheck = async () => {
@@ -76,6 +72,7 @@ function App() {
     }
   };
 
+  /** 生成整页 PDF（沿用你现有后端 /v1/api/pdf） */
   const doGeneratePdf = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -83,11 +80,9 @@ function App() {
       const payload = {
         title: title?.trim() || "未命名文档",
         text: text?.trim() || "",
-        // 可选：抬头 LOGO & 来源链接（后端用或忽略都兼容）
         logo: "",
         source: "",
       };
-
       const res = await fetch(`${API_BASE}/v1/api/pdf`, {
         method: "POST",
         headers: {
@@ -96,23 +91,12 @@ function App() {
         },
         body: JSON.stringify(payload),
       });
-
-      // 后端本就返回 Content-Type: application/pdf；如果 500 就会抛异常
       if (!res.ok) {
         const msg = await res.text();
         throw new Error(`HTTP ${res.status} | ${msg}`);
       }
-
       const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = "quote.pdf";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
-
+      triggerDownload(blob, "quote.pdf");
       alertMsg("PDF 已生成并开始下载。");
     } catch (e) {
       alertMsg(`PDF 生成失败：${e.message}`);
@@ -122,10 +106,21 @@ function App() {
     }
   };
 
+  /** 工具：触发浏览器下载 */
+  const triggerDownload = (blob, filename) => {
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  /** 单页抓取 */
   const doScrape = async () => {
-    if (!url?.trim()) {
-      return alertMsg("请先输入要抓取的网页链接。");
-    }
+    if (!url?.trim()) return alertMsg("请先输入要抓取的网页链接。");
     try {
       const data = await fetchJson("/v1/api/scrape", { url: url.trim() });
       setScrapeJson(JSON.stringify(data, null, 2));
@@ -135,7 +130,7 @@ function App() {
     }
   };
 
-  // “回填（基础）”：把 scrape 的结果回填到标题/正文（拆最基础字段）
+  /** 回填（基础）：把 scrape 的结果回填到标题/正文 */
   const doFillBasic = () => {
     if (!scrapeJson) return alertMsg("请先抓取，再回填。");
     try {
@@ -146,7 +141,6 @@ function App() {
         obj?.description ||
         (obj?.ok ? `【抓取成功】${obj?.url || ""}` : "");
       if (t) setTitle(t);
-      // 用简短的概览补全正文，不覆盖用户已有内容（只追加）
       const addition = [
         "【基本信息】",
         `名称: ${t || "（未识别）"}`,
@@ -163,23 +157,19 @@ function App() {
     }
   };
 
-  // “智能回填”：占位（以后打通你后端智能抽取接口再接上）
+  /** 智能回填：先占位（后续可换成你的智能抽取接口） */
   const doFillSmart = async () => {
     if (!scrapeJson) return alertMsg("请先抓取，再回填。");
     try {
-      // 这里预留：你将来可能是 /v1/api/smart/parse 之类
-      // const smart = await fetchJson("/v1/api/smart/parse", { html: ... });
-      // 先用基础回填代替
       doFillBasic();
     } catch (e) {
       alertMsg(`智能回填失败：${e.message}`);
     }
   };
 
+  /** 目录抓取 */
   const doCatalogParse = async () => {
-    if (!catalogUrl?.trim()) {
-      return alertMsg("请先输入目录页链接。");
-    }
+    if (!catalogUrl?.trim()) return alertMsg("请先输入目录页链接。");
     try {
       const data = await fetchJson("/v1/api/catalog/parse", {
         url: catalogUrl.trim(),
@@ -191,7 +181,7 @@ function App() {
     }
   };
 
-  // 把目录 JSON 的前 N 条写入正文
+  /** 把目录 JSON 的前 N 条写入正文 */
   const writeCatalogToText = (limit = 50) => {
     if (!catalogJson) return alertMsg("请先抓取目录。");
     try {
@@ -213,6 +203,107 @@ function App() {
       alertMsg("已将目录前 50 条写入正文。");
     } catch (e) {
       alertMsg(`写入正文失败：${e.message}`);
+    }
+  };
+
+  /**
+   * —— 新增：从目录 JSON 生成 columns & rows（通用字段）
+   * 你后端会按 columns 顺序生成 Excel/表格 PDF。
+   */
+  const normalizeCatalogTable = () => {
+    if (!catalogJson) throw new Error("请先抓取目录再导出。");
+    const obj = JSON.parse(catalogJson);
+    const list = obj?.products || obj?.items || [];
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new Error("目录结果中找不到 products/items 列表。");
+    }
+    // 统一列定义：与后端导出接口约定的 key
+    const columns = [
+      { key: "index", title: "#", width: 6 },
+      { key: "title", title: "标题/Title", width: 32 },
+      { key: "sku", title: "SKU", width: 16 },
+      { key: "price", title: "价格/Price", width: 14 },
+      { key: "moq", title: "MOQ", width: 10 },
+      { key: "url", title: "链接/URL", width: 48 },
+      { key: "image", title: "图片/Image", width: 30 },
+    ];
+    const rows = list.map((p, i) => ({
+      index: i + 1,
+      title: p?.title || p?.name || "",
+      sku: p?.sku || "",
+      price: p?.price ?? "",
+      moq: p?.moq ?? "",
+      url: p?.url || p?.link || "",
+      image: p?.image || p?.img || (Array.isArray(p?.images) ? p.images[0] : ""),
+    }));
+    return { columns, rows };
+  };
+
+  /** —— 新增：导出 Excel（catalogJson → /v1/api/export/excel） */
+  const exportExcel = async () => {
+    try {
+      const { columns, rows } = normalizeCatalogTable();
+      const payload = {
+        name: title?.trim() || "导出结果",
+        columns,
+        rows,
+        meta: {
+          source: catalogUrl,
+          generatedBy: "MVP3-Frontend",
+        },
+      };
+      const res = await fetch(`${API_BASE}/v1/api/export/excel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(`HTTP ${res.status} | ${msg}`);
+      }
+      const blob = await res.blob();
+      const filename = `${payload.name || "export"}.xlsx`;
+      triggerDownload(blob, filename);
+      alertMsg("Excel 已生成并开始下载。");
+    } catch (e) {
+      alertMsg(`导出 Excel 失败：${e.message}`);
+      console.error(e);
+    }
+  };
+
+  /** —— 新增：导出表格 PDF（catalogJson → /v1/api/export/table-pdf） */
+  const exportTablePdf = async () => {
+    try {
+      const { columns, rows } = normalizeCatalogTable();
+      const payload = {
+        title: title?.trim() || "表格导出",
+        subtitle: catalogUrl || "",
+        columns,
+        rows,
+      };
+      const res = await fetch(`${API_BASE}/v1/api/export/table-pdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/pdf",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(`HTTP ${res.status} | ${msg}`);
+      }
+      const blob = await res.blob();
+      const filename = `${payload.title || "table"}.pdf`;
+      triggerDownload(blob, filename);
+      alertMsg("表格 PDF 已生成并开始下载。");
+    } catch (e) {
+      alertMsg(`导出表格 PDF 失败：${e.message}`);
+      console.error(e);
     }
   };
 
@@ -253,8 +344,7 @@ function App() {
       </div>
 
       <div style={{ marginTop: 6, color: "#666", fontSize: 12 }}>
-        API 基址 / API-Basis：{" "}
-        <code>{API_BASE}/v1/api</code>
+        API 基址 / API-Basis： <code>{API_BASE}/v1/api</code>
       </div>
 
       {/* Web-Scraping & 一键回填 */}
@@ -280,20 +370,24 @@ function App() {
         />
       </div>
 
-      {/* 目录抓取 Demo */}
+      {/* 目录抓取 Demo + 导出（新增按钮在此） */}
       <div style={{ marginTop: 24 }}>
         <h3>📚 目录抓取 Demo（/v1/api/catalog/parse）</h3>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <input
             value={catalogUrl}
             onChange={(e) => setCatalogUrl(e.target.value)}
-            style={{ flex: 1, height: 28, padding: "0 8px" }}
+            style={{ flex: 1, minWidth: 300, height: 28, padding: "0 8px" }}
             placeholder="https://example.com"
           />
           <button onClick={doCatalogParse}>抓取目录</button>
           <button onClick={() => writeCatalogToText(50)}>
             目录写入正文（前 50 条）
           </button>
+
+          {/* —— 新增两颗导出按钮 —— */}
+          <button onClick={exportExcel}>导出 Excel</button>
+          <button onClick={exportTablePdf}>表格 PDF</button>
         </div>
 
         <textarea
