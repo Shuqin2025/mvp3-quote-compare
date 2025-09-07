@@ -1,11 +1,11 @@
 import React, { useMemo, useRef, useState } from "react";
 
 /**
- * MVP3 前端（增强版）
- * - 后端基址优先读取：VITE_API_BASE，其次 VITE_API_URL（Render 环境变量）
- * - 提供：/v1/api/health、/v1/api/pdf、/v1/api/scrape、/v1/api/catalog/parse
+ * MVP3 前端（精简版）
+ * - 后端基址优先读取：VITE_API_BASE，其次 VITE_API_URL
+ * - 提供：/v1/api/health、/v1/api/pdf、/v1/api/catalog/parse
  * - 导出：/v1/api/export/excel（HTML->XLS 兼容），/v1/api/export/table-pdf（pdfkit）
- * - 新增：VITE_SHOW_SCRAPE=0 隐藏 “Web-Scraping & 一键回填” 模块
+ * - 已移除：标题输入框、Web-Scraping & 一键回填
  */
 
 const fallbackAPI = "https://yunivera-mvp2-cwyr.onrender.com";
@@ -23,19 +23,11 @@ function App() {
     return qp || envBase || envUrl || fallbackAPI;
   }, []);
 
-  // 是否展示 “Web-Scraping & 一键回填” 模块（默认显示；env=0 隐藏）
-  const SHOW_SCRAPE = (import.meta?.env?.VITE_SHOW_SCRAPE ?? "1") !== "0";
-
-  // 标题 & 正文
-  const [title, setTitle] = useState("");
+  // 文本正文（保留）
   const [text, setText] = useState("");
 
-  // 健康检查
+  // 健康检查提示
   const [health, setHealth] = useState("");
-
-  // 抓取区（可被隐藏）
-  const [url, setUrl] = useState("https://example.com");
-  const [scrapeJson, setScrapeJson] = useState("");
 
   // 目录抓取
   const [catalogUrl, setCatalogUrl] = useState("https://example.com");
@@ -75,13 +67,13 @@ function App() {
     }
   };
 
-  // 整页 PDF
+  // 生成整页 PDF（仍可从正文生成）
   const doGeneratePdf = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     try {
       const payload = {
-        title: title?.trim() || "未命名文档",
+        title: bestDocTitle(),   // 自动推断标题
         text: text?.trim() || "",
         logo: "",
         source: "",
@@ -114,64 +106,6 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  // —— 小工具：判断是否像“目录链接” —— //
-  const looksLikeCatalog = (u = "") => {
-    const s = (u || "").toLowerCase();
-    return /\/catalog\//.test(s) || /\/katalog\//.test(s);
-  };
-
-  // 单页抓取（当模块隐藏时用户看不到这块；逻辑仍保留以便日后开启）
-  const doScrape = async () => {
-    const u = url?.trim();
-    if (!u) return alertMsg("请先输入要抓取的网页链接。");
-
-    // 自动分流：如果像目录链接，移动到下方输入框
-    if (looksLikeCatalog(u)) {
-      setCatalogUrl(u);
-      alertMsg("检测到这是一个【目录链接】，已自动转移到下方【目录抓取 Demo】输入框，请在下方点击：抓取目录。");
-      setTimeout(() => catalogBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-      return;
-    }
-
-    // 正常单页抓取
-    try {
-      const data = await fetchJson("/v1/api/scrape", { url: u });
-      setScrapeJson(JSON.stringify(data, null, 2));
-    } catch (e) {
-      setScrapeJson(`抓取失败：${e.message}`);
-      alertMsg(`抓取失败：${e.message}`);
-    }
-  };
-
-  // 回填（基础）
-  const doFillBasic = () => {
-    if (!scrapeJson) return alertMsg("请先抓取，再回填。");
-    try {
-      const obj = JSON.parse(scrapeJson);
-      const t = obj?.title || obj?.name || "";
-      const preview =
-        obj?.preview || obj?.description || (obj?.ok ? `【抓取成功】${obj?.url || ""}` : "");
-      if (t) setTitle(t);
-      const addition = [
-        "【基本信息】",
-        `名称: ${t || "（未识别）"}`,
-        `URL: ${obj?.url || "（未知）"}`,
-        obj?.preview ? `简介: ${obj.preview}` : "",
-        "",
-      ].filter(Boolean).join("\n");
-      setText((old) => (old ? `${old}\n\n${addition}` : addition));
-      alertMsg("已回填基础信息。");
-    } catch (e) {
-      alertMsg(`回填失败：${e.message}`);
-    }
-  };
-
-  // “智能回填”占位（暂时与基础回填一致）
-  const doFillSmart = async () => {
-    if (!scrapeJson) return alertMsg("请先抓取，再回填。");
-    try { doFillBasic(); } catch (e) { alertMsg(`智能回填失败：${e.message}`); }
-  };
-
   // 目录抓取
   const doCatalogParse = async () => {
     const u = catalogUrl?.trim();
@@ -179,6 +113,8 @@ function App() {
     try {
       const data = await fetchJson("/v1/api/catalog/parse", { url: u });
       setCatalogJson(JSON.stringify(data, null, 2));
+      // 滚动到结果区
+      setTimeout(() => catalogBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     } catch (e) {
       setCatalogJson(`目录抓取失败：${e.message}`);
       alertMsg(`目录抓取失败：${e.message}`);
@@ -196,10 +132,10 @@ function App() {
       }
       const take = list.slice(0, limit);
       const rows = take.map((p, i) => {
-        const name = p?.title || p?.name || p?.sku || `Item ${i + 1}`;
-        const sku = p?.sku ? ` | SKU: ${p.sku}` : "";
+        const name  = p?.title || p?.name || p?.sku || `Item ${i + 1}`;
+        const sku   = p?.sku   ? ` | SKU: ${p.sku}`   : "";
         const price = p?.price ? ` | 价格: ${p.price}` : "";
-        const moq = p?.moq ? ` | MOQ: ${p.moq}` : "";
+        const moq   = p?.moq   ? ` | MOQ: ${p.moq}`   : "";
         return `- ${name}${sku}${price}${moq}`;
       });
       const block = ["【抓取目录（前 50 条）】", ...rows, ""].join("\n");
@@ -239,12 +175,23 @@ function App() {
     return { columns, rows };
   };
 
+  // 从正文或目录 URL 推断一个友好的标题/文件名
+  const bestDocTitle = () => {
+    const firstLine = (text || "").split(/\r?\n/).map(s => s.trim()).find(Boolean);
+    if (firstLine) return firstLine.slice(0, 40);
+    try {
+      const u = new URL(catalogUrl);
+      const seg = (u.pathname.split("/").filter(Boolean).pop() || "").replace(/\.[a-z0-9]+$/i, "");
+      return seg ? decodeURIComponent(seg).slice(0, 40) : "导出结果";
+    } catch { return "导出结果"; }
+  };
+
   // 导出 Excel
   const exportExcel = async () => {
     try {
       const { columns, rows } = normalizeCatalogTable();
       const payload = {
-        name: title?.trim() || "导出结果",
+        name: bestDocTitle(),
         columns, rows,
         meta: { source: catalogUrl, generatedBy: "MVP3-Frontend" },
       };
@@ -266,12 +213,12 @@ function App() {
     }
   };
 
-  // 导出 表格PDF
+  // 导出 表格 PDF
   const exportTablePdf = async () => {
     try {
       const { columns, rows } = normalizeCatalogTable();
       const payload = {
-        title: title?.trim() || "表格导出",
+        title: bestDocTitle() || "表格导出",
         subtitle: catalogUrl || "",
         columns, rows,
       };
@@ -294,23 +241,13 @@ function App() {
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "22px" }}>
       <h2 style={{ margin: "0 0 14px" }}>MVP3：Scrapen + Ausfüllen + PDF erzeugen</h2>
 
-      {/* 标题 / 正文 */}
-      <div style={{ marginBottom: 10 }}>
-        <div>标题 / Titel：</div>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="例如：测试报价单 / Testangebot"
-          style={{ width: "100%", height: 28, padding: "0 8px" }}
-        />
-      </div>
-
+      {/* 正文 / Text（保留） */}
       <div style={{ marginBottom: 10 }}>
         <div>正文 / Text：</div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="在此输入或使用下方‘回填/智能回填/目录抓取’自动生成"
+          placeholder="在此输入内容，或使用下方‘目录抓取/写入正文/导出’自动生成"
           style={{ width: "100%", height: 220, padding: 8 }}
         />
       </div>
@@ -327,30 +264,6 @@ function App() {
       <div style={{ marginTop: 6, color: "#666", fontSize: 12 }}>
         API 基址 / API-Basis： <code>{API_BASE}/v1/api</code>
       </div>
-
-      {/* 🔎 Web-Scraping & 一键回填（按开关显示/隐藏） */}
-      {SHOW_SCRAPE && (
-        <div style={{ marginTop: 24 }}>
-          <h3>🔎 Web-Scraping & 一键回填</h3>
-          <div style={{ display: "flex", gap: 6 }}>
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              style={{ flex: 1, height: 28, padding: "0 8px" }}
-              placeholder="https://example.com"
-            />
-            <button onClick={doScrape}>抓取 / Scrapen</button>
-            <button onClick={doFillBasic}>回填（基础）</button>
-            <button onClick={doFillSmart}>智能回填（含价格/币种/SKU/MOQ）</button>
-          </div>
-          <textarea
-            value={scrapeJson}
-            readOnly
-            placeholder="抓取结果 JSON 会显示在这里"
-            style={{ width: "100%", height: 220, padding: 8, marginTop: 8 }}
-          />
-        </div>
-      )}
 
       {/* 目录抓取 + 导出 */}
       <div style={{ marginTop: 24 }} ref={catalogBoxRef}>
