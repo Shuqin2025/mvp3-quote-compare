@@ -2,7 +2,10 @@
 <html lang="zh">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
     <title>MVP3 Quote Compare</title>
     <style>
       body { font-family: sans-serif; margin: 1em; }
@@ -11,15 +14,7 @@
   <body>
     <!-- React App 挂载点 -->
     <div id="root"></div>
-
-    <!-- 如需“运行期注入”临时覆盖域名，可取消注释并填写
-    <script>
-      window.__ENV__ = {
-        VITE_API_BASE: "https://yunivera-mvp2-cwyr.onrender.com"
-      };
-    </script>
-    -->
-
+    <!-- Vite 会在构建时将下面这一行重写为 /assets/index-xxxx.js -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
