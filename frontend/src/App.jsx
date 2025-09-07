@@ -2,19 +2,19 @@ import React, { useMemo, useRef, useState } from "react";
 
 /**
  * MVP3 前端（增强版）
- * - 后端基址：VITE_API_URL（Render 环境变量），无则回退 fallbackAPI
- * - /v1/api/health、/v1/api/pdf、/v1/api/scrape、/v1/api/catalog/parse
- * - /v1/api/export/excel（Excel 兼容 HTML，无需依赖）
- * - /v1/api/export/table-pdf（pdfkit）
+ * - 后端基址优先读取：VITE_API_BASE，其次 VITE_API_URL（Render 环境变量）
+ * - 提供：/v1/api/health、/v1/api/pdf、/v1/api/scrape、/v1/api/catalog/parse
+ * - 导出：/v1/api/export/excel（HTML->XLS 兼容），/v1/api/export/table-pdf（pdfkit）
  */
 
-// 兜底（最终以 VITE_API_URL 为准）
+// 兜底（最终仍以环境变量为准）
 const fallbackAPI = "https://yunivera-mvp2.onrender.com";
 
 function App() {
   const API_BASE = useMemo(() => {
-    const envUrl = import.meta?.env?.VITE_API_URL?.trim();
-    return envUrl || fallbackAPI;
+    const envBase = import.meta?.env?.VITE_API_BASE?.trim?.();
+    const envUrl  = import.meta?.env?.VITE_API_URL?.trim?.();
+    return envBase || envUrl || fallbackAPI;
   }, []);
 
   // 标题 & 正文
@@ -35,11 +35,7 @@ function App() {
   const busyRef = useRef(false);
 
   const alertMsg = (msg) => {
-    try {
-      window.alert(msg);
-    } catch {
-      console.log(msg);
-    }
+    try { window.alert(msg); } catch { console.log(msg); }
   };
 
   const fetchJson = async (path, payload) => {
@@ -56,6 +52,7 @@ function App() {
     return ct.includes("application/json") ? res.json() : res.text();
   };
 
+  // 健康检查
   const doHealthCheck = async () => {
     try {
       const res = await fetch(`${API_BASE}/v1/api/health`);
@@ -134,9 +131,7 @@ function App() {
         `URL: ${obj?.url || "（未知）"}`,
         obj?.preview ? `简介: ${obj.preview}` : "",
         "",
-      ]
-        .filter(Boolean)
-        .join("\n");
+      ].filter(Boolean).join("\n");
       setText((old) => (old ? `${old}\n\n${addition}` : addition));
       alertMsg("已回填基础信息。");
     } catch (e) {
@@ -147,11 +142,7 @@ function App() {
   // “智能回填”占位（先等同基础回填）
   const doFillSmart = async () => {
     if (!scrapeJson) return alertMsg("请先抓取，再回填。");
-    try {
-      doFillBasic();
-    } catch (e) {
-      alertMsg(`智能回填失败：${e.message}`);
-    }
+    try { doFillBasic(); } catch (e) { alertMsg(`智能回填失败：${e.message}`); }
   };
 
   // 目录抓取
@@ -166,7 +157,7 @@ function App() {
     }
   };
 
-  // 把目录的前 N 条写入正文
+  // 目录 -> 正文（前 N 条）
   const writeCatalogToText = (limit = 50) => {
     if (!catalogJson) return alertMsg("请先抓取目录。");
     try {
@@ -191,7 +182,7 @@ function App() {
     }
   };
 
-  // —— 统一为表格导出的列与行
+  // 统一整理成导出表格的列 & 行
   const normalizeCatalogTable = () => {
     if (!catalogJson) throw new Error("请先抓取目录再导出。");
     const obj = JSON.parse(catalogJson);
@@ -220,6 +211,7 @@ function App() {
     return { columns, rows };
   };
 
+  // 导出 Excel
   const exportExcel = async () => {
     try {
       const { columns, rows } = normalizeCatalogTable();
@@ -247,6 +239,7 @@ function App() {
     }
   };
 
+  // 导出 表格PDF
   const exportTablePdf = async () => {
     try {
       const { columns, rows } = normalizeCatalogTable();
