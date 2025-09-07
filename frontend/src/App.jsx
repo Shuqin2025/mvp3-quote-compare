@@ -7,14 +7,22 @@ import React, { useMemo, useRef, useState } from "react";
  * - 导出：/v1/api/export/excel（HTML->XLS 兼容），/v1/api/export/table-pdf（pdfkit）
  */
 
-// 兜底（最终仍以环境变量为准）
-const fallbackAPI = "https://yunivera-mvp2.onrender.com";
+// 兜底：即使构建期没注入环境变量，也能走到正确后端
+const fallbackAPI = "https://yunivera-mvp2-cwyr.onrender.com";
 
 function App() {
   const API_BASE = useMemo(() => {
+    // 1) Render 环境变量（构建期注入）
     const envBase = import.meta?.env?.VITE_API_BASE?.trim?.();
     const envUrl  = import.meta?.env?.VITE_API_URL?.trim?.();
-    return envBase || envUrl || fallbackAPI;
+    // 2) 查询串兜底（便于临时排障：?api=https://xxxx）
+    const qp = (() => {
+      try {
+        const u = new URL(window.location.href);
+        return u.searchParams.get("api")?.trim();
+      } catch { return ""; }
+    })();
+    return qp || envBase || envUrl || fallbackAPI;
   }, []);
 
   // 标题 & 正文
@@ -55,7 +63,7 @@ function App() {
   // 健康检查
   const doHealthCheck = async () => {
     try {
-      const res = await fetch(`${API_BASE}/v1/api/health`);
+      const res = await fetch(`${API_BASE}/v1/api/health`, { method: "GET" });
       const txt = await res.text();
       setHealth(`PING ${res.status} OK | ${txt}`);
       alertMsg(`后端健康检查成功：${res.status}`);
@@ -191,21 +199,21 @@ function App() {
       throw new Error("目录结果中找不到 products/items 列表。");
     }
     const columns = [
-      { key: "index", title: "#", width: 6 },
-      { key: "title", title: "标题/Title", width: 32 },
-      { key: "sku", title: "SKU", width: 16 },
-      { key: "price", title: "价格/Price", width: 14 },
-      { key: "moq", title: "MOQ", width: 10 },
-      { key: "url", title: "链接/URL", width: 48 },
-      { key: "image", title: "图片/Image", width: 30 },
+      { key: "index",  title: "#",             width: 6  },
+      { key: "title",  title: "标题/Title",    width: 32 },
+      { key: "sku",    title: "SKU",           width: 16 },
+      { key: "price",  title: "价格/Price",    width: 14 },
+      { key: "moq",    title: "MOQ",           width: 10 },
+      { key: "url",    title: "链接/URL",      width: 48 },
+      { key: "image",  title: "图片/Image",    width: 30 },
     ];
     const rows = list.map((p, i) => ({
       index: i + 1,
       title: p?.title || p?.name || "",
-      sku: p?.sku || "",
+      sku:   p?.sku   || "",
       price: p?.price ?? "",
-      moq: p?.moq ?? "",
-      url: p?.url || p?.link || "",
+      moq:   p?.moq   ?? "",
+      url:   p?.url || p?.link || "",
       image: p?.image || p?.img || (Array.isArray(p?.images) ? p.images[0] : ""),
     }));
     return { columns, rows };
@@ -217,8 +225,7 @@ function App() {
       const { columns, rows } = normalizeCatalogTable();
       const payload = {
         name: title?.trim() || "导出结果",
-        columns,
-        rows,
+        columns, rows,
         meta: { source: catalogUrl, generatedBy: "MVP3-Frontend" },
       };
       const res = await fetch(`${API_BASE}/v1/api/export/excel`, {
@@ -246,8 +253,7 @@ function App() {
       const payload = {
         title: title?.trim() || "表格导出",
         subtitle: catalogUrl || "",
-        columns,
-        rows,
+        columns, rows,
       };
       const res = await fetch(`${API_BASE}/v1/api/export/table-pdf`, {
         method: "POST",
