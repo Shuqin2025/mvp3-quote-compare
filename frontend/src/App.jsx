@@ -1,293 +1,380 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE ||
-  import.meta.env.VITE_API_URL ||
-  ""; // 兼容你的两种变量名
+/**
+ * MVP3 前端（增强版）
+ * - 后端基址优先读取：VITE_API_BASE，其次 VITE_API_URL（Render 环境变量）
+ * - 提供：/v1/api/health、/v1/api/pdf、/v1/api/scrape、/v1/api/catalog/parse
+ * - 导出：/v1/api/export/excel（HTML->XLS 兼容），/v1/api/export/table-pdf（pdfkit）
+ */
 
-const isCatalogUrl = (u) => /\/catalog\//i.test(u || "");
+// 兜底：即使构建期没注入环境变量，也能走到正确后端
+const fallbackAPI = "https://yunivera-mvp2-cwyr.onrender.com";
 
-export default function App() {
-  // —— 顶部健康检查与 PDF —— //
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [ping, setPing] = useState("尚未检查");
-  const [pingLoading, setPingLoading] = useState(false);
-  const [pdfLoading, setPdfLoading] = useState(false);
-
-  // —— 单页抓取（回填） —— //
-  const [scrapeUrl, setScrapeUrl] = useState("https://example.com");
-  const [scrapeResult, setScrapeResult] = useState("");
-  const [scrapeLoading, setScrapeLoading] = useState(false);
-
-  // —— 目录抓取 —— //
-  const [catalogUrl, setCatalogUrl] = useState("https://example.com");
-  const [catalogJson, setCatalogJson] = useState(null);
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
-  const [writeTopLoading, setWriteTopLoading] = useState(false);
-
-  const api = useMemo(() => API_BASE.replace(/\/+$/, "") + "/v1/api", []);
-
-  // 健康检查
-  const doPing = async () => {
-    if (!api) return alert("API 基址未配置");
-    try {
-      setPingLoading(true);
-      const r = await fetch(`${api}/health`);
-      const j = await r.json();
-      if (!r.ok) throw new Error(JSON.stringify(j));
-      setPing(`PING 200 OK | ${JSON.stringify(j)}`);
-    } catch (e) {
-      setPing(`健康检查失败： ${String(e.message || e)}`);
-      alert(`后端健康检查失败： ${String(e.message || e)}`);
-    } finally {
-      setPingLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    // 自动试一次，方便验证
-    doPing();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+function App() {
+  const API_BASE = useMemo(() => {
+    // 1) Render 环境变量（构建期注入）
+    const envBase = import.meta?.env?.VITE_API_BASE?.trim?.();
+    const envUrl  = import.meta?.env?.VITE_API_URL?.trim?.();
+    // 2) 查询串兜底（便于临时排障：?api=https://xxxx）
+    const qp = (() => {
+      try {
+        const u = new URL(window.location.href);
+        return u.searchParams.get("api")?.trim();
+      } catch { return ""; }
+    })();
+    return qp || envBase || envUrl || fallbackAPI;
   }, []);
 
-  // 生成 PDF（沿用你原有 API）
-  const generatePdf = async () => {
-    if (!api) return alert("API 基址未配置");
+  // 标题 & 正文
+  const [title, setTitle] = useState("");
+  const [text, setText] = useState("");
+
+  // 健康检查
+  const [health, setHealth] = useState("");
+
+  // 抓取区
+  const [url, setUrl] = useState("https://example.com");
+  const [scrapeJson, setScrapeJson] = useState("");
+
+  // 目录抓取
+  const [catalogUrl, setCatalogUrl] = useState("https://example.com");
+  const [catalogJson, setCatalogJson] = useState("");
+
+  const busyRef = useRef(false);
+  const catalogBoxRef = useRef(null);
+
+  const alertMsg = (msg) => {
+    try { window.alert(msg); } catch { console.log(msg); }
+  };
+
+  const fetchJson = async (path, payload) => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload ?? {}),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`HTTP ${res.status} - ${err || "request failed"}`);
+    }
+    const ct = res.headers.get("content-type") || "";
+    return ct.includes("application/json") ? res.json() : res.text();
+  };
+
+  // 健康检查
+  const doHealthCheck = async () => {
     try {
-      setPdfLoading(true);
-      const r = await fetch(`${api}/pdf`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, body }),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      // 后端会触发浏览器下载
-      alert("PDF 已生成并开始下载。");
+      const res = await fetch(`${API_BASE}/v1/api/health`, { method: "GET" });
+      const txt = await res.text();
+      setHealth(`PING ${res.status} OK | ${txt}`);
+      alertMsg(`后端健康检查成功：${res.status}`);
     } catch (e) {
-      alert(`PDF 生成失败： ${String(e.message || e)}`);
-    } finally {
-      setPdfLoading(false);
+      setHealth(`健康检查失败：${e.message}`);
+      alertMsg(`后端健康检查失败：${e.message}`);
     }
   };
 
-  // —— 改动点 1 & 2：更清晰的占位文字 + 误粘贴目录链接时的友好提示 —— //
-  const handleScrape = async () => {
-    if (!api) return alert("API 基址未配置");
-    const url = scrapeUrl.trim();
+  // 整页 PDF
+  const doGeneratePdf = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      const payload = {
+        title: title?.trim() || "未命名文档",
+        text: text?.trim() || "",
+        logo: "",
+        source: "",
+      };
+      const res = await fetch(`${API_BASE}/v1/api/pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/pdf" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status} | ${await res.text()}`);
+      const blob = await res.blob();
+      triggerDownload(blob, "quote.pdf");
+      alertMsg("PDF 已生成并开始下载。");
+    } catch (e) {
+      alertMsg(`PDF 生成失败：${e.message}`);
+      console.error(e);
+    } finally {
+      busyRef.current = false;
+    }
+  };
 
-    // 如果用户把“目录链接”粘到了“单页抓取”里，友好拦截 + 一键转移
-    if (isCatalogUrl(url)) {
-      setCatalogUrl(url);
-      alert(
-        "检测到这是一个『目录链接』，已自动转移到下方【目录抓取 Demo】输入框，请在下方点击『抓取目录』。"
-      );
+  const triggerDownload = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // —— 小工具：判断是否像“目录链接” —— //
+  const looksLikeCatalog = (u = "") => {
+    const s = (u || "").toLowerCase();
+    // 你的目标站是 /catalog/...；可以把其它站规则一并放进来
+    return /\/catalog\//.test(s) || /\/katalog\//.test(s);
+  };
+
+  // 单页抓取（含“目录 URL 误填”自动分流）
+  const doScrape = async () => {
+    const u = url?.trim();
+    if (!u) return alertMsg("请先输入要抓取的网页链接。");
+
+    // ① 自动分流：如果像目录链接，移动到下方输入框
+    if (looksLikeCatalog(u)) {
+      setCatalogUrl(u);
+      alertMsg("检测到这是一个【目录链接】，已自动转移到下方【目录抓取 Demo】输入框，请在下方点击：抓取目录。");
+      // 友好滚动到目录区
+      setTimeout(() => catalogBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
       return;
     }
-    if (!/^https?:\/\//i.test(url)) {
-      return alert("请输入以 http(s) 开头的网页地址（单页详情）");
-    }
 
+    // ② 正常做单页抓取
     try {
-      setScrapeLoading(true);
-      setScrapeResult("⏳ 抓取中...");
-      const r = await fetch(`${api}/scrape`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+      const data = await fetchJson("/v1/api/scrape", { url: u });
+      setScrapeJson(JSON.stringify(data, null, 2));
+    } catch (e) {
+      setScrapeJson(`抓取失败：${e.message}`);
+      alertMsg(`抓取失败：${e.message}`);
+    }
+  };
+
+  // 回填（基础）
+  const doFillBasic = () => {
+    if (!scrapeJson) return alertMsg("请先抓取，再回填。");
+    try {
+      const obj = JSON.parse(scrapeJson);
+      const t = obj?.title || obj?.name || "";
+      const preview =
+        obj?.preview || obj?.description || (obj?.ok ? `【抓取成功】${obj?.url || ""}` : "");
+      if (t) setTitle(t);
+      const addition = [
+        "【基本信息】",
+        `名称: ${t || "（未识别）"}`,
+        `URL: ${obj?.url || "（未知）"}`,
+        obj?.preview ? `简介: ${obj.preview}` : "",
+        "",
+      ].filter(Boolean).join("\n");
+      setText((old) => (old ? `${old}\n\n${addition}` : addition));
+      alertMsg("已回填基础信息。");
+    } catch (e) {
+      alertMsg(`回填失败：${e.message}`);
+    }
+  };
+
+  // “智能回填”占位（先等同基础回填）
+  const doFillSmart = async () => {
+    if (!scrapeJson) return alertMsg("请先抓取，再回填。");
+    try { doFillBasic(); } catch (e) { alertMsg(`智能回填失败：${e.message}`); }
+  };
+
+  // 目录抓取
+  const doCatalogParse = async () => {
+    const u = catalogUrl?.trim();
+    if (!u) return alertMsg("请先输入目录页链接。");
+    try {
+      const data = await fetchJson("/v1/api/catalog/parse", { url: u });
+      setCatalogJson(JSON.stringify(data, null, 2));
+    } catch (e) {
+      setCatalogJson(`目录抓取失败：${e.message}`);
+      alertMsg(`目录抓取失败：${e.message}`);
+    }
+  };
+
+  // 目录 -> 正文（前 N 条）
+  const writeCatalogToText = (limit = 50) => {
+    if (!catalogJson) return alertMsg("请先抓取目录。");
+    try {
+      const obj = JSON.parse(catalogJson);
+      const list = obj?.products || obj?.items || [];
+      if (!Array.isArray(list) || list.length === 0) {
+        return alertMsg("目录结果中找不到 products/items 列表。");
+      }
+      const take = list.slice(0, limit);
+      const rows = take.map((p, i) => {
+        const name = p?.title || p?.name || p?.sku || `Item ${i + 1}`;
+        const sku = p?.sku ? ` | SKU: ${p.sku}` : "";
+        const price = p?.price ? ` | 价格: ${p.price}` : "";
+        const moq = p?.moq ? ` | MOQ: ${p.moq}` : "";
+        return `- ${name}${sku}${price}${moq}`;
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(`HTTP ${r.status} - ${JSON.stringify(j)}`);
-      setScrapeResult(JSON.stringify(j, null, 2));
+      const block = ["【抓取目录（前 50 条）】", ...rows, ""].join("\n");
+      setText((old) => (old ? `${old}\n\n${block}` : block));
+      alertMsg("已将目录前 50 条写入正文。");
     } catch (e) {
-      setScrapeResult(`❌ 抓取失败： ${String(e.message || e)}`);
-      alert(`抓取失败： ${String(e.message || e)}`);
-    } finally {
-      setScrapeLoading(false);
+      alertMsg(`写入正文失败：${e.message}`);
     }
   };
 
-  const handleCatalogParse = async () => {
-    if (!api) return alert("API 基址未配置");
-    const url = catalogUrl.trim();
-    if (!/^https?:\/\//i.test(url)) {
-      return alert("请输入以 http(s) 开头的目录地址");
+  // 统一整理成导出表格的列 & 行
+  const normalizeCatalogTable = () => {
+    if (!catalogJson) throw new Error("请先抓取目录再导出。");
+    const obj = JSON.parse(catalogJson);
+    const list = obj?.products || obj?.items || [];
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new Error("目录结果中找不到 products/items 列表。");
     }
-    try {
-      setCatalogLoading(true);
-      setCatalogJson(null);
-      const r = await fetch(`${api}/catalog/parse?url=${encodeURIComponent(url)}`);
-      const j = await r.json();
-      if (!r.ok) throw new Error(`HTTP ${r.status} - ${JSON.stringify(j)}`);
-      setCatalogJson(j);
-    } catch (e) {
-      alert(`目录抓取失败： ${String(e.message || e)}`);
-      setCatalogJson({ ok: false, error: String(e.message || e) });
-    } finally {
-      setCatalogLoading(false);
-    }
-  };
-
-  // 写入正文（前50条）
-  const writeCatalogToBody = async () => {
-    if (!catalogJson?.ok || !Array.isArray(catalogJson.products)) {
-      return alert("请先抓取目录，再写入正文。");
-    }
-    try {
-      setWriteTopLoading(true);
-      const top = catalogJson.products.slice(0, 50);
-      const lines = ["【抓取目录（前 50 条）】", ...top.map((p, i) => `- ${p.title || ""}`)];
-      setBody(lines.join("\n"));
-    } finally {
-      setWriteTopLoading(false);
-    }
+    const columns = [
+      { key: "index",  title: "#",             width: 6  },
+      { key: "title",  title: "标题/Title",    width: 32 },
+      { key: "sku",    title: "SKU",           width: 16 },
+      { key: "price",  title: "价格/Price",    width: 14 },
+      { key: "moq",    title: "MOQ",           width: 10 },
+      { key: "url",    title: "链接/URL",      width: 48 },
+      { key: "image",  title: "图片/Image",    width: 30 },
+    ];
+    const rows = list.map((p, i) => ({
+      index: i + 1,
+      title: p?.title || p?.name || "",
+      sku:   p?.sku   || "",
+      price: p?.price ?? "",
+      moq:   p?.moq   ?? "",
+      url:   p?.url || p?.link || "",
+      image: p?.image || p?.img || (Array.isArray(p?.images) ? p.images[0] : ""),
+    }));
+    return { columns, rows };
   };
 
   // 导出 Excel
   const exportExcel = async () => {
-    if (!api) return alert("API 基址未配置");
-    if (!catalogJson?.ok || !Array.isArray(catalogJson.products)) {
-      return alert("请先抓取目录，再导出 Excel。");
-    }
     try {
-      setExportLoading(true);
-      const r = await fetch(`${api}/export/excel`, {
+      const { columns, rows } = normalizeCatalogTable();
+      const payload = {
+        name: title?.trim() || "导出结果",
+        columns, rows,
+        meta: { source: catalogUrl, generatedBy: "MVP3-Frontend" },
+      };
+      const res = await fetch(`${API_BASE}/v1/api/export/excel`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: catalogJson.source,
-          products: catalogJson.products,
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/vnd.ms-excel",
+        },
+        body: JSON.stringify(payload),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      alert("Excel 已生成并开始下载。");
+      if (!res.ok) throw new Error(`HTTP ${res.status} | ${await res.text()}`);
+      const blob = await res.blob();
+      triggerDownload(blob, `${payload.name || "export"}.xls`);
+      alertMsg("Excel 已生成并开始下载。");
     } catch (e) {
-      alert(`导出 Excel 失败： ${String(e.message || e)}`);
-    } finally {
-      setExportLoading(false);
+      alertMsg(`导出 Excel 失败：${e.message}`);
+      console.error(e);
+    }
+  };
+
+  // 导出 表格PDF
+  const exportTablePdf = async () => {
+    try {
+      const { columns, rows } = normalizeCatalogTable();
+      const payload = {
+        title: title?.trim() || "表格导出",
+        subtitle: catalogUrl || "",
+        columns, rows,
+      };
+      const res = await fetch(`${API_BASE}/v1/api/export/table-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/pdf" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status} | ${await res.text()}`);
+      const blob = await res.blob();
+      triggerDownload(blob, `${payload.title || "table"}.pdf`);
+      alertMsg("表格 PDF 已生成并开始下载。");
+    } catch (e) {
+      alertMsg(`导出表格 PDF 失败：${e.message}`);
+      console.error(e);
     }
   };
 
   return (
-    <div style={{ maxWidth: 980, margin: "0 auto", padding: "1rem" }}>
-      <h1>MVP3：Scrapen + Ausfüllen + PDF erzeugen</h1>
+    <div style={{ maxWidth: 1180, margin: "0 auto", padding: "22px" }}>
+      <h2 style={{ margin: "0 0 14px" }}>MVP3：Scrapen + Ausfüllen + PDF erzeugen</h2>
 
-      {/* 标题 */}
-      <div>
-        <label>标题 / Titel：</label>
+      {/* 标题 / 正文 */}
+      <div style={{ marginBottom: 10 }}>
+        <div>标题 / Titel：</div>
         <input
-          style={{ width: "100%" }}
-          placeholder="例如：测试报价单 / Testangebot"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          placeholder="例如：测试报价单 / Testangebot"
+          style={{ width: "100%", height: 28, padding: "0 8px" }}
         />
       </div>
 
-      {/* 正文 */}
-      <div style={{ marginTop: 12 }}>
-        <label>正文 / Text：</label>
+      <div style={{ marginBottom: 10 }}>
+        <div>正文 / Text：</div>
         <textarea
-          style={{ width: "100%", height: 220 }}
-          placeholder="在此输入或使用下方『回填/智能回填/目录抓取』自动生成"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="在此输入或使用下方‘回填/智能回填/目录抓取’自动生成"
+          style={{ width: "100%", height: 220, padding: 8 }}
         />
       </div>
 
-      {/* 后端检查 & PDF */}
-      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-        <button onClick={doPing} disabled={pingLoading}>
-          {pingLoading ? "检查中…" : "后端健康检查 / Backend-Check"}
-        </button>
-        <button onClick={generatePdf} disabled={pdfLoading}>
-          {pdfLoading ? "生成中…" : "生成 PDF / PDF erzeugen"}
-        </button>
-        <span style={{ color: "#555" }}>[PING] {ping}</span>
-        <div style={{ fontSize: 12, color: "#777" }}>
-          API 基址 / API-Basis： <code>{api}</code>
+      {/* 后端健康检查 + 生成 PDF + PING 状态 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button onClick={doHealthCheck}>后端健康检查 / Backend-Check</button>
+        <button onClick={doGeneratePdf}>生成 PDF / PDF erzeugen</button>
+        <span style={{ color: health.startsWith("PING") ? "#0a7a0a" : "#888" }}>
+          [PING] {health || "尚未检查"}
+        </span>
+      </div>
+
+      <div style={{ marginTop: 6, color: "#666", fontSize: 12 }}>
+        API 基址 / API-Basis： <code>{API_BASE}/v1/api</code>
+      </div>
+
+      {/* Web-Scraping & 一键回填 */}
+      <div style={{ marginTop: 24 }}>
+        <h3>🔎 Web-Scraping & 一键回填</h3>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            style={{ flex: 1, height: 28, padding: "0 8px" }}
+            placeholder="https://example.com"
+          />
+          <button onClick={doScrape}>抓取 / Scrapen</button>
+          <button onClick={doFillBasic}>回填（基础）</button>
+          <button onClick={doFillSmart}>智能回填（含价格/币种/SKU/MOQ）</button>
         </div>
+        <textarea
+          value={scrapeJson}
+          readOnly
+          placeholder="抓取结果 JSON 会显示在这里"
+          style={{ width: "100%", height: 220, padding: 8, marginTop: 8 }}
+        />
       </div>
 
-      {/* —— Web-Scraping（一键回填） —— */}
-      <h3 style={{ marginTop: 16 }}>🔎 Web-Scraping & 一键回填</h3>
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          style={{ flex: 1 }}
-          placeholder="https://example.com（单页详情）"
-          value={scrapeUrl}
-          onChange={(e) => setScrapeUrl(e.target.value)}
+      {/* 目录抓取 + 导出 */}
+      <div style={{ marginTop: 24 }} ref={catalogBoxRef}>
+        <h3>📚 目录抓取 Demo（/v1/api/catalog/parse）</h3>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <input
+            value={catalogUrl}
+            onChange={(e) => setCatalogUrl(e.target.value)}
+            style={{ flex: 1, minWidth: 300, height: 28, padding: "0 8px" }}
+            placeholder="https://example.com"
+          />
+          <button onClick={doCatalogParse}>抓取目录</button>
+          <button onClick={() => writeCatalogToText(50)}>目录写入正文（前 50 条）</button>
+          <button onClick={exportExcel}>导出 Excel</button>
+          <button onClick={exportTablePdf}>表格 PDF</button>
+        </div>
+        <textarea
+          value={catalogJson}
+          readOnly
+          placeholder="目录抓取结果 JSON 会显示在这里"
+          style={{ width: "100%", height: 220, padding: 8, marginTop: 8 }}
         />
-        <button onClick={handleScrape} disabled={scrapeLoading}>
-          {scrapeLoading ? "抓取中…" : "抓取 / Scrapen"}
-        </button>
-        <button
-          onClick={() => {
-            // 方便把单页内容写回正文（基础）
-            try {
-              const j = JSON.parse(scrapeResult || "{}");
-              const titleLine = j.title ? `【标题】\n${j.title}\n` : "";
-              const descLine = j.description ? `【描述】\n${j.description}\n` : "";
-              const h1Line =
-                Array.isArray(j.h1) && j.h1.length
-                  ? `【H1】\n${j.h1.join(" | ")}\n`
-                  : "";
-              setBody([titleLine, descLine, h1Line, body].join("\n").trim());
-            } catch {
-              alert("当前抓取结果不是有效 JSON，无法写入正文。");
-            }
-          }}
-        >
-          回填（基础）
-        </button>
-        <button
-          onClick={() =>
-            alert("智能回填（含价格/币种/SKU/MOQ）留作后续增强，目前请使用目录抓取 + Excel。")
-          }
-        >
-          智能回填（含价格/币种/SKU/MOQ）
-        </button>
       </div>
-      <textarea
-        style={{ width: "100%", height: 140, marginTop: 8 }}
-        readOnly
-        value={scrapeResult}
-        placeholder="抓取结果 JSON 会显示在这里"
-      />
-
-      {/* —— 目录抓取 —— */}
-      <h3 style={{ marginTop: 20 }}>📦 目录抓取 Demo（/v1/api/catalog/parse）</h3>
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          style={{ flex: 1 }}
-          placeholder="https://…/catalog/…（目录列表页）"
-          value={catalogUrl}
-          onChange={(e) => setCatalogUrl(e.target.value)}
-        />
-        <button onClick={handleCatalogParse} disabled={catalogLoading}>
-          {catalogLoading ? "抓取中…" : "抓取目录"}
-        </button>
-        <button onClick={writeCatalogToBody} disabled={writeTopLoading}>
-          {writeTopLoading ? "写入中…" : "目录写入正文（前 50 条）"}
-        </button>
-        <button onClick={exportExcel} disabled={exportLoading}>
-          {exportLoading ? "导出中…" : "导出 Excel"}
-        </button>
-        <button
-          onClick={() =>
-            alert("表格 PDF 导出留作后续增强。当前请先用导出 Excel。")
-          }
-        >
-          表格 PDF
-        </button>
-      </div>
-      <textarea
-        style={{ width: "100%", height: 240, marginTop: 8 }}
-        readOnly
-        value={
-          catalogJson ? JSON.stringify(catalogJson, null, 2) : "（抓取结果 JSON 会显示在这里）"
-        }
-      />
     </div>
   );
 }
+
+export default App;
