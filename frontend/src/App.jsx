@@ -5,17 +5,15 @@ import React, { useMemo, useRef, useState } from "react";
  * - 后端基址优先读取：VITE_API_BASE，其次 VITE_API_URL（Render 环境变量）
  * - 提供：/v1/api/health、/v1/api/pdf、/v1/api/scrape、/v1/api/catalog/parse
  * - 导出：/v1/api/export/excel（HTML->XLS 兼容），/v1/api/export/table-pdf（pdfkit）
+ * - 新增：VITE_SHOW_SCRAPE=0 隐藏 “Web-Scraping & 一键回填” 模块
  */
 
-// 兜底：即使构建期没注入环境变量，也能走到正确后端
 const fallbackAPI = "https://yunivera-mvp2-cwyr.onrender.com";
 
 function App() {
   const API_BASE = useMemo(() => {
-    // 1) Render 环境变量（构建期注入）
     const envBase = import.meta?.env?.VITE_API_BASE?.trim?.();
     const envUrl  = import.meta?.env?.VITE_API_URL?.trim?.();
-    // 2) 查询串兜底（便于临时排障：?api=https://xxxx）
     const qp = (() => {
       try {
         const u = new URL(window.location.href);
@@ -25,6 +23,9 @@ function App() {
     return qp || envBase || envUrl || fallbackAPI;
   }, []);
 
+  // 是否展示 “Web-Scraping & 一键回填” 模块（默认显示；env=0 隐藏）
+  const SHOW_SCRAPE = (import.meta?.env?.VITE_SHOW_SCRAPE ?? "1") !== "0";
+
   // 标题 & 正文
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
@@ -32,7 +33,7 @@ function App() {
   // 健康检查
   const [health, setHealth] = useState("");
 
-  // 抓取区
+  // 抓取区（可被隐藏）
   const [url, setUrl] = useState("https://example.com");
   const [scrapeJson, setScrapeJson] = useState("");
 
@@ -116,25 +117,23 @@ function App() {
   // —— 小工具：判断是否像“目录链接” —— //
   const looksLikeCatalog = (u = "") => {
     const s = (u || "").toLowerCase();
-    // 你的目标站是 /catalog/...；可以把其它站规则一并放进来
     return /\/catalog\//.test(s) || /\/katalog\//.test(s);
   };
 
-  // 单页抓取（含“目录 URL 误填”自动分流）
+  // 单页抓取（当模块隐藏时用户看不到这块；逻辑仍保留以便日后开启）
   const doScrape = async () => {
     const u = url?.trim();
     if (!u) return alertMsg("请先输入要抓取的网页链接。");
 
-    // ① 自动分流：如果像目录链接，移动到下方输入框
+    // 自动分流：如果像目录链接，移动到下方输入框
     if (looksLikeCatalog(u)) {
       setCatalogUrl(u);
       alertMsg("检测到这是一个【目录链接】，已自动转移到下方【目录抓取 Demo】输入框，请在下方点击：抓取目录。");
-      // 友好滚动到目录区
       setTimeout(() => catalogBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
       return;
     }
 
-    // ② 正常做单页抓取
+    // 正常单页抓取
     try {
       const data = await fetchJson("/v1/api/scrape", { url: u });
       setScrapeJson(JSON.stringify(data, null, 2));
@@ -167,7 +166,7 @@ function App() {
     }
   };
 
-  // “智能回填”占位（先等同基础回填）
+  // “智能回填”占位（暂时与基础回填一致）
   const doFillSmart = async () => {
     if (!scrapeJson) return alertMsg("请先抓取，再回填。");
     try { doFillBasic(); } catch (e) { alertMsg(`智能回填失败：${e.message}`); }
@@ -329,27 +328,29 @@ function App() {
         API 基址 / API-Basis： <code>{API_BASE}/v1/api</code>
       </div>
 
-      {/* Web-Scraping & 一键回填 */}
-      <div style={{ marginTop: 24 }}>
-        <h3>🔎 Web-Scraping & 一键回填</h3>
-        <div style={{ display: "flex", gap: 6 }}>
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            style={{ flex: 1, height: 28, padding: "0 8px" }}
-            placeholder="https://example.com"
+      {/* 🔎 Web-Scraping & 一键回填（按开关显示/隐藏） */}
+      {SHOW_SCRAPE && (
+        <div style={{ marginTop: 24 }}>
+          <h3>🔎 Web-Scraping & 一键回填</h3>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              style={{ flex: 1, height: 28, padding: "0 8px" }}
+              placeholder="https://example.com"
+            />
+            <button onClick={doScrape}>抓取 / Scrapen</button>
+            <button onClick={doFillBasic}>回填（基础）</button>
+            <button onClick={doFillSmart}>智能回填（含价格/币种/SKU/MOQ）</button>
+          </div>
+          <textarea
+            value={scrapeJson}
+            readOnly
+            placeholder="抓取结果 JSON 会显示在这里"
+            style={{ width: "100%", height: 220, padding: 8, marginTop: 8 }}
           />
-          <button onClick={doScrape}>抓取 / Scrapen</button>
-          <button onClick={doFillBasic}>回填（基础）</button>
-          <button onClick={doFillSmart}>智能回填（含价格/币种/SKU/MOQ）</button>
         </div>
-        <textarea
-          value={scrapeJson}
-          readOnly
-          placeholder="抓取结果 JSON 会显示在这里"
-          style={{ width: "100%", height: 220, padding: 8, marginTop: 8 }}
-        />
-      </div>
+      )}
 
       {/* 目录抓取 + 导出 */}
       <div style={{ marginTop: 24 }} ref={catalogBoxRef}>
