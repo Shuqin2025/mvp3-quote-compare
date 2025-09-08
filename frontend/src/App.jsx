@@ -2,9 +2,9 @@ import React, { useMemo, useRef, useState } from "react";
 
 /**
  * MVP3 前端（精简版）
- * - 后端基址优先读取：VITE_API_BASE，其次 VITE_API_URL
+ * - 后端基址优先读取：VITE_API_BASE，其次 VITE_API_URL，再其次 ?api=
  * - 提供：/v1/api/health、/v1/api/pdf、/v1/api/catalog/parse
- * - 导出：/v1/api/export/excel（HTML->XLS 兼容），/v1/api/export/table-pdf（pdfkit）
+ * - 导出：/v1/api/export/excel（ExcelJS .xlsx，含图片）、/v1/api/export/table-pdf（pdfkit）
  * - 已移除：标题输入框、Web-Scraping & 一键回填
  */
 
@@ -186,7 +186,7 @@ function App() {
     } catch { return "导出结果"; }
   };
 
-  // 导出 Excel
+  // ✅ 导出 Excel（ExcelJS .xlsx，含图片）
   const exportExcel = async () => {
     try {
       const { columns, rows } = normalizeCatalogTable();
@@ -199,13 +199,16 @@ function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Accept: "application/vnd.ms-excel",
+          // xlsx 的媒体类型（给浏览器一个提示，不是必须）
+          Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status} | ${await res.text()}`);
       const blob = await res.blob();
-      triggerDownload(blob, `${payload.name || "export"}.xls`);
+      // 用 .xlsx 作为扩展名
+      const filename = `${payload.name || "export"}.xlsx`;
+      triggerDownload(blob, filename);
       alertMsg("Excel 已生成并开始下载。");
     } catch (e) {
       alertMsg(`导出 Excel 失败：${e.message}`);
