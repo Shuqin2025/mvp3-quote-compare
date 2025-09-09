@@ -17,24 +17,59 @@
     <button onclick="i18n.setLang('en')">🇬🇧 English</button>
   </div>
 
-  <!-- React/Vite 挂载点 -->
+  <!-- React / Vite 挂载点 -->
   <div id="root"></div>
 
-  <!-- 多语言脚本 -->
+  <!-- 轻量 i18n + DOM 贴片 + fetch 打补丁（无需改现有 React 代码） -->
   <script>
   (function () {
+    /* ========= 字典（先覆盖当前页面出现的文案） ========= */
     const dict = {
       en: {
         "app.title": "MVP3: Scrape + Fill + PDF/Excel",
+        "label.body": "Text:",
+        "btn.health": "Backend Check",
+        "btn.makePdf": "Generate PDF",
+        "label.apiBase": "API Base:",
+        "block.demo": "Catalog Fetch Demo (/v1/api/catalog/parse)",
+        "ph.url": "https://example.com",
+        "btn.fetch": "Fetch",
+        "btn.fill50": "Write into Body (first 50)",
+        "btn.excel": "Export Excel",
+        "btn.pdfTable": "Export PDF (table)",
+        "hint.json": "Fetched JSON will appear here."
       },
       de: {
         "app.title": "MVP3: Scrapen + Ausfüllen + PDF/Excel",
+        "label.body": "Text:",
+        "btn.health": "Backend-Check",
+        "btn.makePdf": "PDF erzeugen",
+        "label.apiBase": "API-Basis:",
+        "block.demo": "Katalog-Demo (/v1/api/catalog/parse)",
+        "ph.url": "https://beispiel.de",
+        "btn.fetch": "Abrufen",
+        "btn.fill50": "In Text einfügen (erste 50)",
+        "btn.excel": "Excel exportieren",
+        "btn.pdfTable": "Tabelle als PDF",
+        "hint.json": "Das JSON-Ergebnis erscheint hier."
       },
       zh: {
         "app.title": "MVP3：抓取 + 填写 + PDF/Excel 生成",
+        "label.body": "正文 / Text：",
+        "btn.health": "后端健康检查",
+        "btn.makePdf": "生成 PDF",
+        "label.apiBase": "API 基址：",
+        "block.demo": "目录抓取 Demo（/v1/api/catalog/parse）",
+        "ph.url": "https://example.com",
+        "btn.fetch": "抓取目录",
+        "btn.fill50": "目录写入正文（前 50 条）",
+        "btn.excel": "导出 Excel",
+        "btn.pdfTable": "表格 PDF",
+        "hint.json": "目录抓取结果 JSON 会显示在这里。"
       }
     };
 
+    /* ========= 语言选择 ========= */
     const LANGS = ["zh", "de", "en"];
     function pickLang() {
       const url = new URL(location.href);
@@ -45,33 +80,40 @@
       return LANGS.includes(cand) ? cand : "de";
     }
 
-    function applyI18n(lang) {
-      const pack = dict[lang] || dict.de;
-      document.querySelectorAll("[data-i18n]").forEach(el => {
-        const key = el.getAttribute("data-i18n");
-        const txt = pack[key];
-        if (txt != null) el.textContent = txt;
-      });
-    }
+    /* ========= 将 DOM 元素与翻译 key 绑定 =========
+       我们不改 React 代码，使用“贴片”方式给现有 DOM 加 data-i18n。
+       匹配规则：优先按 id / 结构猜测；不行再按文案内容正则兜底。
+    */
+    function bindKeysOnce() {
+      // h1 标题 -> app.title
+      const h1 = document.querySelector("h1");
+      if (h1 && !h1.dataset.i18n) h1.dataset.i18n = "app.title";
 
-    function setLang(lang) {
-      if (!LANGS.includes(lang)) lang = "de";
-      localStorage.setItem("lang", lang);
-      applyI18n(lang);
-      window.__currentLang = lang;
-    }
+      // “正文 / Text：” 标签：找包含“正文”或“Text”的 label/div/span
+      const bodyLabel =
+        document.querySelector('label:has(textarea)') ||
+        Array.from(document.querySelectorAll("label,div,span")).find(el =>
+          /正文|Text/i.test(el.textContent || "")
+        );
+      if (bodyLabel && !bodyLabel.dataset.i18n) bodyLabel.dataset.i18n = "label.body";
 
-    window.i18n = { setLang, pickLang };
+      // Backend-Check 按钮
+      const btnHealth = Array.from(document.querySelectorAll("button"))
+        .find(b => /Backend-?Check|健康|Health/i.test(b.textContent || ""));
+      if (btnHealth && !btnHealth.dataset.i18n) btnHealth.dataset.i18n = "btn.health";
 
-    document.addEventListener("DOMContentLoaded", () => {
-      const lang = pickLang();
-      window.__currentLang = lang;
-      applyI18n(lang);
-    });
-  })();
-  </script>
+      // 生成 PDF / PDF erzeugen
+      const btnPDF = Array.from(document.querySelectorAll("button"))
+        .find(b => /PDF\s*erzeugen|生成\s*PDF|Make\s*PDF/i.test(b.textContent || ""));
+      if (btnPDF && !btnPDF.dataset.i18n) btnPDF.dataset.i18n = "btn.makePdf";
 
-  <!-- 原来的 Vite/React 脚本 -->
-  <script type="module" src="/src/main.jsx"></script>
-</body>
-</html>
+      // “API 基址 / API-Basis”
+      const apiLabel = Array.from(document.querySelectorAll("small,div,span"))
+        .find(el => /API[\s-]?基址|API[- ]?Basis/i.test(el.textContent || ""));
+      // 只替换“前缀文字”，不动后面的 URL
+      if (apiLabel && !apiLabel.querySelector("[data-i18n='label.apiBase']")) {
+        const textNode = document.createElement("span");
+        textNode.dataset.i18n = "label.apiBase";
+        // 把原先 label 的中文/德文部分替换掉
+        apiLabel.innerHTML = "";
+        apiLabel.
