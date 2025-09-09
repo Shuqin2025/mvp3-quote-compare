@@ -1,20 +1,77 @@
 <!DOCTYPE html>
 <html lang="zh">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0"
-    />
-    <title>MVP3 Quote Compare</title>
-    <style>
-      body { font-family: sans-serif; margin: 1em; }
-    </style>
-  </head>
-  <body>
-    <!-- React App 挂载点 -->
-    <div id="root"></div>
-    <!-- Vite 会在构建时将下面这一行重写为 /assets/index-xxxx.js -->
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MVP3 Quote Compare</title>
+  <style>
+    body { font-family: sans-serif; margin: 1em; }
+    #langSwitcher button { margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <!-- 语言切换器 -->
+  <div id="langSwitcher" style="margin-bottom: 1em;">
+    <button onclick="i18n.setLang('zh')">🇨🇳 中文</button>
+    <button onclick="i18n.setLang('de')">🇩🇪 Deutsch</button>
+    <button onclick="i18n.setLang('en')">🇬🇧 English</button>
+  </div>
+
+  <!-- React/Vite 挂载点 -->
+  <div id="root"></div>
+
+  <!-- 多语言脚本 -->
+  <script>
+  (function () {
+    const dict = {
+      en: {
+        "app.title": "MVP3: Scrape + Fill + PDF/Excel",
+      },
+      de: {
+        "app.title": "MVP3: Scrapen + Ausfüllen + PDF/Excel",
+      },
+      zh: {
+        "app.title": "MVP3：抓取 + 填写 + PDF/Excel 生成",
+      }
+    };
+
+    const LANGS = ["zh", "de", "en"];
+    function pickLang() {
+      const url = new URL(location.href);
+      const q = url.searchParams.get("lang");
+      const s = localStorage.getItem("lang");
+      const nav = (navigator.language || "en").slice(0,2).toLowerCase();
+      const cand = q || s || (LANGS.includes(nav) ? nav : "de");
+      return LANGS.includes(cand) ? cand : "de";
+    }
+
+    function applyI18n(lang) {
+      const pack = dict[lang] || dict.de;
+      document.querySelectorAll("[data-i18n]").forEach(el => {
+        const key = el.getAttribute("data-i18n");
+        const txt = pack[key];
+        if (txt != null) el.textContent = txt;
+      });
+    }
+
+    function setLang(lang) {
+      if (!LANGS.includes(lang)) lang = "de";
+      localStorage.setItem("lang", lang);
+      applyI18n(lang);
+      window.__currentLang = lang;
+    }
+
+    window.i18n = { setLang, pickLang };
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const lang = pickLang();
+      window.__currentLang = lang;
+      applyI18n(lang);
+    });
+  })();
+  </script>
+
+  <!-- 原来的 Vite/React 脚本 -->
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 </html>
