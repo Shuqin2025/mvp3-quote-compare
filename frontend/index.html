@@ -6,13 +6,27 @@
   <title>MVP3 Quote Compare</title>
   <style>
     body { font-family: sans-serif; margin: 1em; }
+    #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
+    #langSwitcher button { padding: 4px 8px; }
   </style>
 </head>
 <body>
+  <!-- 语言切换器（只设置语言，不改 UI 文案） -->
+  <div id="langSwitcher">
+    <button onclick="i18n.setLang('zh')">🇨🇳 中文</button>
+    <button onclick="i18n.setLang('de')">🇩🇪 Deutsch</button>
+    <button onclick="i18n.setLang('en')">🇬🇧 English</button>
+  </div>
+
   <!-- React App 挂载 -->
   <div id="root"></div>
 
-  <!-- Vite 会在构建时把这一行替换成 /assets/index-xxxx.js -->
+  <!-- 语言状态（安全） -->
+  <script src="/i18n.js"></script>
+  <!-- 仅给导出接口自动附带语言（安全） -->
+  <script src="/lang-fetch.js"></script>
+
+  <!-- Vite / React 入口（保持不变） -->
   <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>
