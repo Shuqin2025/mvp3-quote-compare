@@ -6,40 +6,29 @@
     <title>MVP3 Quote Compare</title>
 
     <style>
-      body {
-        font-family: sans-serif;
-        margin: 1em;
-      }
-      #langSwitcher {
-        margin-bottom: 1em;
-        display: flex;
-        gap: 8px;
-      }
-      #langSwitcher button {
-        padding: 4px 8px;
-      }
+      body { font-family: sans-serif; margin: 1em; }
+      #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
+      #langSwitcher button { padding: 4px 8px; }
     </style>
 
-    <!-- UI 增强样式 -->
+    <!-- 来自 public/，构建后会出现在 dist/ 根目录 -->
     <link rel="stylesheet" href="/ui-enhance.css?v=36" />
   </head>
   <body>
-    <!-- 语言切换器 -->
     <div id="langSwitcher">
       <button onclick="i18n.setLang('zh')">CN 中文</button>
       <button onclick="i18n.setLang('de')">DE Deutsch</button>
       <button onclick="i18n.setLang('en')">GB English</button>
     </div>
 
-    <!-- React App 挂载点 -->
     <div id="root"></div>
 
-    <!-- 基础脚本：i18n + 增强逻辑 -->
+    <!-- 同在 public/，构建后也在 dist/ 根目录 -->
     <script src="/i18n.js?v=36"></script>
     <script src="/lang-fetch.js?v=36"></script>
     <script src="/ui-enhance.js?v=36"></script>
 
-    <!-- React/Vite 入口：构建时自动替换 -->
+    <!-- Vite 开发/构建入口：构建时自动变更为 /assets/index-*.js -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
