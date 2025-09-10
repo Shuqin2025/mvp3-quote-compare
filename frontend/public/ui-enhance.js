@@ -1,226 +1,170 @@
 /**
- * ui-enhance v3.3
- * - 更保守的隐藏策略：仅隐藏必要节点，避免误隐藏大容器
- * - 默认隐藏：开发按钮(Backend-Check/PING)、API 基址行、下方 JSON 预览；?dev=1 显示
- * - 只保留下方 PDF；主/次按钮、箭头、加载态
- * - 同父级时：controls 在上、preview 在下（加 class，不搬 DOM）
+ * ui-enhance v3.4
+ * - 仅隐藏具体元素，不隐藏父容器（避免把整个 UI 藏掉）
+ * - 等主 UI 出现后再执行隐藏/美化（解决时序）
+ * - 只保留下方 PDF；主/次按钮+箭头；?dev=1 显示开发区块
  */
 (function () {
   const log = (...a) => { try { console.log("[ui-enhance]", ...a); } catch(e){} };
-  log("loaded v3.3");
+  log("loaded v3.4");
 
-  const $all = (sel) => Array.from(document.querySelectorAll(sel));
-  const findBtnByText = (patterns) =>
-    $all("button").find(b => patterns.some(re => re.test((b.textContent || "").trim())));
+  const $ = (sel, root=document) => root.querySelector(sel);
+  const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+  const txt = (n) => (n?.textContent || "").trim();
 
-  /* ---------- dev mode ---------- */
-  function isDevMode() {
+  /* ---------------- dev mode ---------------- */
+  function isDev() {
     try {
-      const url = new URL(location.href);
-      if (url.searchParams.get("dev") === "1") localStorage.setItem("dev", "1");
+      const u = new URL(location.href);
+      if (u.searchParams.get("dev") === "1") localStorage.setItem("dev", "1");
       return localStorage.getItem("dev") === "1";
     } catch { return false; }
   }
-  function applyDevMode() {
-    document.body.classList.toggle("yx-devmode", isDevMode());
+  function showIfDev(el){ if (!el) return; el.style.display = isDev() ? "" : "none"; }
+  function hideIfNotDev(el){ if (!el) return; if (!isDev()) el.style.display = "none"; }
+
+  /* ---------------- wait until UI appears ---------------- */
+  function uiReady() {
+    // 判定：出现“抓取/预览/Excel/URL 输入框/正文文本域”之一，即认为 UI 已挂载
+    const hasFetch   = $$("button").some(b => /抓取|Abrufen|^Fetch$/i.test(txt(b)));
+    const hasPreview = $$("button").some(b => /预览|目录写入|einfügen|Write/i.test(txt(b)));
+    const hasExcel   = $$("button").some(b => /导出\s*Excel|Excel exportieren|Export\s*Excel/i.test(txt(b)));
+    const hasInput   = $("input[type='text'], input");
+    const hasText    = $("textarea");
+    return hasFetch || hasPreview || hasExcel || hasInput || hasText;
   }
-  function hideDevOnly(el) {
-    if (!el) return;
-    el.classList.add("yx-devonly");
-    if (!isDevMode()) el.style.display = "none";
+  function waitForUI(cb, timeout=6000){
+    const start = Date.now();
+    const tick = () => {
+      if (uiReady() || Date.now() - start > timeout) cb();
+      else requestAnimationFrame(tick);
+    };
+    tick();
   }
 
-  /* ---------- toolbar（URL + 按钮） ---------- */
-  function findToolbar() {
-    const urlInput = document.querySelector("input[type='text'], input");
-    if (!urlInput) return null;
-    const p = urlInput.parentElement;
-    if (p) {
-      const btns = Array.from(p.querySelectorAll("button"));
-      if (btns.length >= 3) return { toolbar: p, btns };
-    }
-    let sib = urlInput.nextElementSibling;
-    while (sib && !sib.querySelector("button")) sib = sib.nextElementSibling;
-    if (sib) {
-      const btns = Array.from(sib.querySelectorAll("button"));
-      if (btns.length >= 3) return { toolbar: sib, btns };
-    }
-    return null;
+  /* ---------------- 按钮获取 ---------------- */
+  function findBtn(reList){
+    return $$("button").find(b => reList.some(re => re.test(txt(b))));
   }
 
-  /* ---------- controls/preview 的温柔布局 ---------- */
-  function findJsonPreview() {
-    const urlInput = document.querySelector("input[type='text'], input");
-    if (!urlInput) return null;
-    const candidates = $all("pre, textarea");
-    for (const el of candidates) {
-      const pos = urlInput.compareDocumentPosition(el);
-      if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return el;
-    }
-    return null;
-  }
-  function reorderIfSameParent() {
-    const preview = findJsonPreview();
-    const urlInput = document.querySelector("input[type='text'], input");
-    if (!preview || !urlInput) return;
-    const pc = preview.parentElement, ic = urlInput.parentElement;
-    if (pc && ic && pc === ic) {
-      pc.classList.add("yx-workbench");
-      ic.classList.add("yx-controls");
-      pc.classList.add("yx-preview");
-    }
-  }
-
-  /* ---------- 判断一个容器是否含有主流程元素 ---------- */
-  function hasMainControls(container) {
-    if (!container) return false;
-    const txt = (n) => (n.textContent || "").trim();
-    const hasFetch   = !!findInside(container, btn => /抓取|Abrufen|^Fetch$/i.test(txt(btn)));
-    const hasPreview = !!findInside(container, btn => /预览|目录写入|einfügen|Write/i.test(txt(btn)));
-    const hasExcel   = !!findInside(container, btn => /导出\s*Excel|Excel exportieren|Export\s*Excel/i.test(txt(btn)));
-    const hasPdf     = !!findInside(container, btn => /表格\s*PDF|PDF\s*erzeugen|Generate\s*PDF|Tabelle.*PDF/i.test(txt(btn)));
-    const hasInput   = container.querySelector("input[type='text'], input");
-    const hasText    = container.querySelector("textarea");
-    return !!(hasFetch || hasPreview || hasExcel || hasPdf || hasInput || hasText);
-  }
-  function findInside(container, predicate) {
-    return Array.from(container.querySelectorAll("button")).find(predicate);
-  }
-
-  /* ---------- 主/次按钮 + 只保留与 Excel 并列的 PDF ---------- */
-  function styleButtons() {
-    let btnFetch   = findBtnByText([/抓取|Abrufen|^Fetch$/i]);
-    let btnPreview = findBtnByText([/预览|目录写入|einfügen|Write/i]);
-    let btnExcel   = findBtnByText([/导出\s*Excel|Excel exportieren|Export\s*Excel/i]);
-
-    if (!(btnFetch && btnPreview && btnExcel)) {
-      const tb = findToolbar();
-      if (tb) {
-        const visible = tb.btns.filter(b => b.offsetParent !== null);
-        if (visible.length >= 3) {
-          btnFetch   = btnFetch   || visible[0];
-          btnPreview = btnPreview || visible[1];
-          btnExcel   = btnExcel   || visible[2];
-        }
-      }
-    }
+  /* ---------------- 主/次按钮 + 只保留下方 PDF ---------------- */
+  function styleButtons(){
+    let btnFetch   = findBtn([/抓取|Abrufen|^Fetch$/i]);
+    let btnPreview = findBtn([/预览|目录写入|einfügen|Write/i]);
+    let btnExcel   = findBtn([/导出\s*Excel|Excel exportieren|Export\s*Excel/i]);
 
     if (btnFetch)   btnFetch.classList.add("btn-primary","step");
     if (btnPreview) btnPreview.classList.add("btn-secondary","step");
     if (btnExcel)   btnExcel.classList.add("btn-secondary","step");
 
-    // 只保留与 Excel 并列的 PDF
-    const pdfBtns = $all("button").filter(b => /表格\s*PDF|PDF\s*erzeugen|Generate\s*PDF|Tabelle.*PDF/i.test((b.textContent||"").trim()));
+    const pdfBtns = $$("button").filter(b => /表格\s*PDF|PDF\s*erzeugen|Generate\s*PDF|Tabelle.*PDF/i.test(txt(b)));
     if (pdfBtns.length) {
-      let keep = null;
-      if (btnExcel) keep = pdfBtns.find(b => b.parentElement === btnExcel.parentElement);
+      // 优先保留和 Excel 同父节点的那一个，否则保留最后一个
+      let keep = btnExcel ? pdfBtns.find(b => b.parentElement === btnExcel.parentElement) : null;
       keep = keep || pdfBtns[pdfBtns.length - 1];
       pdfBtns.forEach(b => { if (b !== keep) b.remove(); });
       if (keep) keep.classList.add("btn-secondary","is-last");
     }
   }
 
-  /* ---------- 抓取加载态（仍保持“快就不显示”） ---------- */
-  function installFetchLoading() {
+  /* ---------------- 抓取加载态（仍“快则不显示”） ---------------- */
+  function installFetchLoading(){
     if (!window.fetch) return;
     const orig = window.fetch.bind(window);
+    let btnFetch = findBtn([/抓取|Abrufen|^Fetch$/i]);
+    const previewBox = (()=>{
+      const input = $("input[type='text'], input");
+      if (!input) return null;
+      // URL 框后面的第一个预览区域（pre/textarea）
+      const list = $$("pre, textarea");
+      for (const el of list){
+        const pos = input.compareDocumentPosition(el);
+        if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return el;
+      }
+      return null;
+    })();
 
-    let btnFetch = findBtnByText([/抓取|Abrufen|^Fetch$/i]);
-    if (!btnFetch) {
-      const tb = findToolbar();
-      if (tb) btnFetch = tb.btns[0];
-    }
-    const previewBox = findJsonPreview();
-
-    function startLoading() {
-      if (btnFetch) { btnFetch.classList.add("btn-loading"); btnFetch.disabled = true; }
-      if (previewBox) {
+    function start(){
+      if (btnFetch){ btnFetch.classList.add("btn-loading"); btnFetch.disabled = true; }
+      if (previewBox){
         const hint = "正在抓取产品信息，请稍候…";
         if (previewBox.tagName === "TEXTAREA") previewBox.placeholder = hint;
-        else if (!previewBox.textContent.trim()) previewBox.textContent = hint;
+        else if (!txt(previewBox)) previewBox.textContent = hint;
       }
     }
-    function stopLoading(success) {
-      if (btnFetch) { btnFetch.classList.remove("btn-loading"); btnFetch.disabled = false; }
-      if (previewBox && !success) {
+    function stop(ok){
+      if (btnFetch){ btnFetch.classList.remove("btn-loading"); btnFetch.disabled = false; }
+      if (previewBox && !ok){
         const err = "⚠️ 抓取失败，请检查网址或稍后再试。";
         if (previewBox.tagName === "TEXTAREA") previewBox.placeholder = err;
         else previewBox.textContent = err;
       }
     }
 
-    window.fetch = async (input, init = {}) => {
-      let isCatalogCall = false;
-      try {
-        const url = typeof input === "string"
-          ? new URL(input, location.origin)
-          : new URL(input.url || "", location.origin);
-        if (/\/v1\/api\/catalog\/parse/i.test(url.pathname)) isCatalogCall = true;
-      } catch {}
-      if (isCatalogCall) startLoading();
-      try {
+    window.fetch = async (input, init={})=>{
+      let isCatalog = false;
+      try{
+        const url = new URL(typeof input==="string" ? input : (input.url||""), location.origin);
+        if (/\/v1\/api\/catalog\/parse/i.test(url.pathname)) isCatalog = true;
+      }catch{}
+      if (isCatalog) start();
+      try{
         const res = await orig(input, init);
-        if (isCatalogCall) stopLoading(true);
+        if (isCatalog) stop(true);
         return res;
-      } catch (e) {
-        if (isCatalogCall) stopLoading(false);
+      }catch(e){
+        if (isCatalog) stop(false);
         throw e;
       }
     };
   }
 
-  /* ---------- 隐藏（更保守） ---------- */
-  function hideExtraForUser() {
-    // 1) 开发按钮：只隐藏按钮本身；如需再隐藏“近邻容器”，须保证不含主流程元素
-    const btnHealth = findBtnByText([/Backend-?Check|健康/i]);
-    const btnPing   = findBtnByText([/^PING/i, /尚未检查/i]);
+  /* ---------------- 更保守的隐藏：只隐藏“具体元素” ---------------- */
+  function hideExtras(){
+    // 1) Backend-Check、PING：仅隐藏按钮/文本本身
+    const btnHealth = findBtn([/Backend-?Check|健康/i]);
+    const pingNode  = $$("*").find(n => /^PING\b/i.test(txt(n)) || /尚未检查/i.test(txt(n)));
 
-    [btnHealth, btnPing].forEach(b => { hideDevOnly(b); });
+    hideIfNotDev(btnHealth);
+    hideIfNotDev(pingNode);
 
-    [btnHealth, btnPing].forEach(b => {
-      if (!b) return;
-      // 限定在浅层容器里（最多上溯到含有按钮行的块级元素）
-      const wrapper = b.closest("div,section,article,p") || b.parentElement;
-      if (wrapper && !hasMainControls(wrapper)) hideDevOnly(wrapper);
-    });
+    // 2) API 基址行：只隐藏那一行文本节点
+    const apiLine = $$("*").find(n => /API\s*基址|API\s*Basis/i.test(txt(n)));
+    hideIfNotDev(apiLine);
 
-    // 2) API 基址：只隐藏“包含 API 基址文字”的那个节点（不再隐藏祖先）
-    try {
-      const nodes = $all("body *");
-      const apiNode = nodes.find(n => /API\s*基址|API\s*Basis/i.test((n.textContent || "").trim()));
-      if (apiNode) hideDevOnly(apiNode);
-    } catch {}
-
-    // 3) 下方 JSON 预览（URL 输入后出现的 pre/textarea）
-    const jsonEl = findJsonPreview();
-    if (jsonEl) hideDevOnly(jsonEl);
+    // 3) JSON 预览：隐藏 URL 输入后的第一个 pre/textarea
+    const input = $("input[type='text'], input");
+    if (input){
+      const pr = $$("pre, textarea").find(el=>{
+        const pos = input.compareDocumentPosition(el);
+        return (pos & Node.DOCUMENT_POSITION_FOLLOWING);
+      });
+      hideIfNotDev(pr);
+    }
   }
 
-  function boot() {
-    applyDevMode();
-    styleButtons();
-    installFetchLoading();
-    hideExtraForUser();
-    reorderIfSameParent();
-
-    const mo = new MutationObserver(() => {
-      applyDevMode();
+  /* ---------------- boot：等待 UI → 美化 & 隐藏 ---------------- */
+  function boot(){
+    waitForUI(()=>{
       styleButtons();
-      hideExtraForUser();
-      reorderIfSameParent();
+      installFetchLoading();
+      hideExtras();
+
+      // 监听后续变动（比如重新渲染）
+      const mo = new MutationObserver(()=>{
+        styleButtons();
+        hideExtras();
+      });
+      mo.observe(document.body, { childList:true, subtree:true });
+
+      window.addEventListener("langchange", ()=>{
+        styleButtons();
+        hideExtras();
+      });
+
+      setTimeout(()=>{ styleButtons(); hideExtras(); }, 600);
+      log("mounted");
     });
-    mo.observe(document.body, { childList: true, subtree: true });
-
-    window.addEventListener("langchange", () => {
-      styleButtons();
-      hideExtraForUser();
-    });
-
-    setTimeout(() => {
-      styleButtons();
-      hideExtraForUser();
-      reorderIfSameParent();
-    }, 600);
   }
 
   if (document.readyState === "loading") {
@@ -228,4 +172,4 @@
   } else {
     boot();
   }
-})(); // EOF v3.3
+})();
