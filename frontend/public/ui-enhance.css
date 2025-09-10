@@ -1,26 +1,35 @@
-/* 主/次按钮风格 */
-.btn-primary {
-  background: #1a73e8; color: #fff; border: none;
-  padding: 6px 14px; border-radius: 6px; font-weight: 600;
+/* 主/次按钮风格（提高优先级） */
+button.btn-primary {
+  background: #1a73e8 !important;
+  color: #fff !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
 }
-.btn-primary:hover { background: #155fc0; }
-.btn-secondary {
-  background: #f6f7f9; color: #111; border: 1px solid #dadee3;
-  padding: 6px 12px; border-radius: 6px;
-}
-.btn-secondary:hover { background: #eef1f5; }
+button.btn-primary:hover { background: #155fc0 !important; }
 
-/* 步骤箭头：给需要串联的按钮加 .step；给最后一个加 .is-last 去掉箭头 */
-.step { position: relative; margin-right: 22px; }
-.step::after {
-  content: "→"; position: absolute; right: -18px; top: 50%;
+button.btn-secondary {
+  background: #f6f7f9 !important;
+  color: #111 !important;
+  border: 1px solid #dadee3 !important;
+  padding: 8px 14px !important;
+  border-radius: 6px !important;
+}
+button.btn-secondary:hover { background: #eef1f5 !important; }
+
+/* 步骤箭头 */
+button.step { position: relative !important; margin-right: 24px !important; }
+button.step::after {
+  content: "→";
+  position: absolute; right: -18px; top: 50%;
   transform: translateY(-50%); opacity: .5; font-weight: 700;
 }
-.step.is-last::after { content: ""; }
+button.step.is-last::after { content: ""; }
 
-/* 抓取时的加载态（按钮自带小旋转图标并禁用） */
-.btn-loading { position: relative; pointer-events: none; opacity: .85; }
-.btn-loading::before {
+/* 加载态 */
+button.btn-loading { position: relative; pointer-events: none; opacity: .9; }
+button.btn-loading::before {
   content: ""; width: 14px; height: 14px; border-radius: 50%;
   border: 2px solid currentColor; border-right-color: transparent;
   display: inline-block; margin-right: 8px; vertical-align: -2px;
@@ -28,11 +37,11 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* 让“抓取栏在上、预览在下”（仅当两个区块在同父级时生效） */
+/* 同父级时让“抓取栏在上、预览在下” */
 .yx-workbench { display: flex; flex-direction: column; gap: 12px; }
 .yx-controls { order: 1; }
 .yx-preview  { order: 2; }
 
-/* 开发者模式隐藏（默认隐藏） */
-.yx-devonly { display: none; }
-.yx-devmode .yx-devonly { display: inline-block; }
+/* 开发者模式 */
+.yx-devonly { display: none !important; }
+.yx-devmode .yx-devonly { display: inline-block !important; }
