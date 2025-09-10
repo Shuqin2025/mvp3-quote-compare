@@ -1,68 +1,99 @@
 <script>
 /**
- * ui-enhance.js (robust v2)
- * - 自检日志：加载/匹配到的按钮都会在控制台输出
- * - 主/次按钮 + 箭头
- * - 抓取加载态（自动识别 /v1/api/catalog/parse）
- * - 开发者模式 dev=1 才显示“后台检查”“PING”；否则隐藏
- * - 同父级时：抓取栏在上、预览在下（仅加 class，不强制搬动 DOM）
+ * ui-enhance v3
+ * - 文案匹配 + 位置兜底（URL 输入右侧同一排按钮：1抓取/2预览/3Excel/4PDF）
+ * - 主/次按钮、步骤箭头、抓取加载态、开发者模式隐藏
+ * - 同父级时：controls 在上、preview 在下（仅加 class，不搬动 DOM）
+ * - 自检日志：看看控制台有无 [ui-enhance] 前缀输出
  */
 (function () {
   const log = (...a) => { try { console.log("[ui-enhance]", ...a); } catch(e){} };
-  window.__uiEnhanceLoaded = true; log("loaded");
+  window.__uiEnhanceLoaded = true; log("loaded v3");
 
   const $all = (sel) => Array.from(document.querySelectorAll(sel));
-  const findBtn = (patterns) =>
+  const findBtnByText = (patterns) =>
     $all("button").find((b) => patterns.some((re) => re.test((b.textContent || "").trim())));
-
-  const getLang = () =>
-    (window.__currentLang ||
-      (window.i18n && window.i18n.pickLang && window.i18n.pickLang()) ||
-      "de");
 
   /* ---------- 开发者模式 ---------- */
   function isDevMode() {
     const url = new URL(location.href);
-    if (url.searchParams.get("dev") === "1") localStorage.setItem("dev", "1");
-    return localStorage.getItem("dev") === "1";
+    if (url.searchParams.get("dev") === "1") localStorage.setItem("dev","1");
+    return localStorage.getItem("dev")==="1";
   }
   function applyDevMode() {
-    const root = document.body;
-    if (isDevMode()) root.classList.add("yx-devmode");
-    else root.classList.remove("yx-devmode");
+    document.body.classList.toggle("yx-devmode", isDevMode());
   }
 
-  /* ---------- 识别并标注按钮 ---------- */
+  /* ---------- 找到“URL 输入 + 一排按钮”的容器（用于位置兜底） ---------- */
+  function findToolbar() {
+    const urlInput = document.querySelector("input[type='text'], input");
+    if (!urlInput) return null;
+    // 如果按钮和输入在同一个父元素内，就用这个父元素当 toolbar
+    const parent = urlInput.parentElement;
+    if (!parent) return null;
+    const btns = Array.from(parent.querySelectorAll("button"));
+    if (btns.length >= 3) return { toolbar: parent, btns };
+    // 退一步：找输入的下一个兄弟里有没有按钮
+    let sib = urlInput.nextElementSibling;
+    while (sib && sib !== parent && !sib.querySelector("button")) sib = sib.nextElementSibling;
+    if (sib && sib.querySelector("button")) {
+      return { toolbar: sib, btns: Array.from(sib.querySelectorAll("button")) };
+    }
+    return null;
+  }
+
+  /* ---------- 给按钮加样式（文案优先，失败则位置兜底） ---------- */
   function styleButtons() {
-    const btnFetch   = findBtn([/抓取|Abrufen|^Fetch$/i]);
-    const btnPreview = findBtn([/预览|目录写入|einfügen|Write/i]);   // 兼容“目录写入正文（前50条）”
-    const btnExcel   = findBtn([/导出\s*Excel|Excel exportieren|Export\s*Excel/i]);
-    const btnPdf     = findBtn([/生成\s*PDF|PDF\s*erzeugen|Generate\s*PDF/i]);
+    // 1) 文案匹配
+    let btnFetch   = findBtnByText([/抓取|Abrufen|^Fetch$/i]);
+    let btnPreview = findBtnByText([/预览|目录写入|einfügen|Write/i]);
+    let btnExcel   = findBtnByText([/导出\s*Excel|Excel exportieren|Export\s*Excel/i]);
+    let btnPdf     = findBtnByText([/表格\s*PDF|PDF\s*erzeugen|Generate\s*PDF|Tabelle.*PDF/i]);
 
-    if (btnFetch)   { btnFetch.classList.add("btn-primary","step"); log("found Fetch:", btnFetch.textContent.trim()); }
-    if (btnPreview) { btnPreview.classList.add("btn-secondary","step"); log("found Preview:", btnPreview.textContent.trim()); }
-    if (btnExcel)   { btnExcel.classList.add("btn-secondary","step","is-last"); log("found Excel:", btnExcel.textContent.trim()); }
-    if (btnPdf)     { btnPdf.classList.add("btn-secondary"); log("found PDF:", btnPdf.textContent.trim()); }
+    // 2) 位置兜底（URL 输入右侧一排按钮）
+    if (!(btnFetch && btnPreview && btnExcel)) {
+      const tb = findToolbar();
+      if (tb) {
+        const list = tb.btns;
+        // 过滤掉隐藏或空文本的
+        const visible = list.filter(b => b.offsetParent !== null);
+        if (visible.length >= 3) {
+          btnFetch   = btnFetch   || visible[0];
+          btnPreview = btnPreview || visible[1];
+          btnExcel   = btnExcel   || visible[2];
+          btnPdf     = btnPdf     || visible[3]; // 可能不存在
+          log("fallback by position:", visible.map(b=>b.textContent.trim()));
+        }
+      }
+    }
 
-    // 开发者模式按钮
-    const btnHealth  = findBtn([/Backend-?Check|健康/i]);
-    const btnPing    = findBtn([/^PING/i, /尚未检查/i]);
+    // 3) 应用样式
+    if (btnFetch)   { btnFetch.classList.add("btn-primary","step"); log("Fetch:", btnFetch.textContent.trim()); }
+    if (btnPreview) { btnPreview.classList.add("btn-secondary","step"); log("Preview:", btnPreview.textContent.trim()); }
+    if (btnExcel)   { btnExcel.classList.add("btn-secondary","step","is-last"); log("Excel:", btnExcel.textContent.trim()); }
+    if (btnPdf)     { btnPdf.classList.add("btn-secondary"); log("PDF:", btnPdf.textContent.trim()); }
 
-    [btnHealth, btnPing].forEach((b) => {
+    // 开发者按钮隐藏
+    const btnHealth = findBtnByText([/Backend-?Check|健康/i]);
+    const btnPing   = findBtnByText([/^PING/i, /尚未检查/i]);
+    [btnHealth, btnPing].forEach(b=>{
       if (!b) return;
       b.classList.add("yx-devonly");
-      log("dev-only button:", b.textContent.trim());
-      // 如果不是 dev 模式，立刻隐藏（即使 CSS 没生效也兜底）
       if (!isDevMode()) b.style.display = "none";
+      log("dev-only:", b.textContent.trim());
     });
   }
 
-  /* ---------- 抓取时加载态与提示 ---------- */
+  /* ---------- 抓取加载态 ---------- */
   function installFetchLoading() {
     if (!window.fetch) return;
     const orig = window.fetch.bind(window);
 
-    const btnFetch   = findBtn([/抓取|Abrufen|^Fetch$/i]);
+    let btnFetch = findBtnByText([/抓取|Abrufen|^Fetch$/i]);
+    if (!btnFetch) {
+      const tb = findToolbar();
+      if (tb) btnFetch = tb.btns[0];
+    }
     const previewBox = document.querySelector("pre, textarea");
 
     function startLoading() {
@@ -85,19 +116,17 @@
     window.fetch = async (input, init = {}) => {
       let isCatalogCall = false;
       try {
-        const url = typeof input === "string"
-          ? new URL(input, location.origin)
-          : new URL(input.url || "", location.origin);
+        const url = typeof input === "string" ? new URL(input, location.origin)
+                  : new URL(input.url || "", location.origin);
         if (/\/v1\/api\/catalog\/parse/i.test(url.pathname)) isCatalogCall = true;
       } catch {}
-
-      if (isCatalogCall) { log("catalog fetching…"); startLoading(); }
+      if (isCatalogCall) startLoading();
       try {
         const res = await orig(input, init);
-        if (isCatalogCall) { log("catalog fetched"); stopLoading(true); }
+        if (isCatalogCall) stopLoading(true);
         return res;
       } catch (e) {
-        if (isCatalogCall) { log("catalog fetch error:", e); stopLoading(false); }
+        if (isCatalogCall) stopLoading(false);
         throw e;
       }
     };
@@ -108,11 +137,9 @@
     const preview = document.querySelector("pre, textarea");
     const urlInput = document.querySelector("input[type='text'], input");
     if (!preview || !urlInput) return;
-    const pc = preview.parentElement;
-    const ic = urlInput.parentElement;
+    const pc = preview.parentElement, ic = urlInput.parentElement;
     if (pc && ic && pc === ic) {
-      const parent = pc;
-      parent.classList.add("yx-workbench");
+      pc.classList.add("yx-workbench");
       ic.classList.add("yx-controls");
       pc.classList.add("yx-preview");
       log("reorder via class on same parent");
@@ -132,12 +159,9 @@
     });
     mo.observe(document.body, { childList: true, subtree: true });
 
-    window.addEventListener("langchange", () => {
-      styleButtons();
-    });
+    window.addEventListener("langchange", () => styleButtons());
 
-    // 二次兜底：1 秒后再跑一次（防止首屏时机太早）
-    setTimeout(() => { styleButtons(); reorderIfSameParent(); }, 1000);
+    setTimeout(() => { styleButtons(); reorderIfSameParent(); }, 800);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
