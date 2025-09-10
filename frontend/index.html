@@ -4,27 +4,35 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MVP3 Quote Compare</title>
+
   <style>
     body { font-family: sans-serif; margin: 1em; }
     #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
     #langSwitcher button { padding: 4px 8px; }
   </style>
+
+  <!-- UI 增强样式（主/次按钮、箭头、加载态、开发者模式等） -->
+  <link rel="stylesheet" href="/ui-enhance.css" />
 </head>
 <body>
-  <!-- 语言切换器（只设置语言，不改 UI 文案） -->
+  <!-- 语言切换器（只设置语言，不改 UI 文案；Excel 导出会随语言） -->
   <div id="langSwitcher">
     <button onclick="i18n.setLang('zh')">🇨🇳 中文</button>
     <button onclick="i18n.setLang('de')">🇩🇪 Deutsch</button>
     <button onclick="i18n.setLang('en')">🇬🇧 English</button>
   </div>
 
-  <!-- React App 挂载 -->
+  <!-- React App 挂载点 -->
   <div id="root"></div>
 
-  <!-- 语言状态（安全） -->
+  <!-- 语言状态（安全：仅记录/读取当前语言） -->
   <script src="/i18n.js"></script>
+
   <!-- 仅给导出接口自动附带语言（安全） -->
   <script src="/lang-fetch.js"></script>
+
+  <!-- UI 增强脚本（主/次按钮、箭头、抓取加载态、开发者模式、同父级时的上下顺序） -->
+  <script src="/ui-enhance.js"></script>
 
   <!-- Vite / React 入口（保持不变） -->
   <script type="module" src="/src/main.jsx"></script>
