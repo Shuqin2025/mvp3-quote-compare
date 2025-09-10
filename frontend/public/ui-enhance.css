@@ -1,0 +1,38 @@
+/* 主/次按钮风格 */
+.btn-primary {
+  background: #1a73e8; color: #fff; border: none;
+  padding: 6px 14px; border-radius: 6px; font-weight: 600;
+}
+.btn-primary:hover { background: #155fc0; }
+.btn-secondary {
+  background: #f6f7f9; color: #111; border: 1px solid #dadee3;
+  padding: 6px 12px; border-radius: 6px;
+}
+.btn-secondary:hover { background: #eef1f5; }
+
+/* 步骤箭头：给需要串联的按钮加 .step；给最后一个加 .is-last 去掉箭头 */
+.step { position: relative; margin-right: 22px; }
+.step::after {
+  content: "→"; position: absolute; right: -18px; top: 50%;
+  transform: translateY(-50%); opacity: .5; font-weight: 700;
+}
+.step.is-last::after { content: ""; }
+
+/* 抓取时的加载态（按钮自带小旋转图标并禁用） */
+.btn-loading { position: relative; pointer-events: none; opacity: .85; }
+.btn-loading::before {
+  content: ""; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent;
+  display: inline-block; margin-right: 8px; vertical-align: -2px;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 让“抓取栏在上、预览在下”（仅当两个区块在同父级时生效） */
+.yx-workbench { display: flex; flex-direction: column; gap: 12px; }
+.yx-controls { order: 1; }
+.yx-preview  { order: 2; }
+
+/* 开发者模式隐藏（默认隐藏） */
+.yx-devonly { display: none; }
+.yx-devmode .yx-devonly { display: inline-block; }
