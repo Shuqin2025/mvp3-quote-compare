@@ -1,26 +1,25 @@
 /**
- * ui-enhance v3.2
- * - 文案匹配 + 位置兜底（URL 输入右侧：1抓取/2预览/3Excel/4PDF）
- * - 主/次按钮、步骤箭头、抓取加载态、开发者模式隐藏
- * - 只保留下方的 PDF（与 Excel 并列）；上方 PDF 隐藏
- * - 默认隐藏：开发者按钮行 / API 基址行 / 原始 JSON（?dev=1 才显示）
- * - 同父级时：controls 在上、preview 在下（仅加 class，不搬动 DOM）
+ * ui-enhance v3.3
+ * - 更保守的隐藏策略：仅隐藏必要节点，避免误隐藏大容器
+ * - 默认隐藏：开发按钮(Backend-Check/PING)、API 基址行、下方 JSON 预览；?dev=1 显示
+ * - 只保留下方 PDF；主/次按钮、箭头、加载态
+ * - 同父级时：controls 在上、preview 在下（加 class，不搬 DOM）
  */
 (function () {
   const log = (...a) => { try { console.log("[ui-enhance]", ...a); } catch(e){} };
-  log("loaded v3.2");
+  log("loaded v3.3");
 
   const $all = (sel) => Array.from(document.querySelectorAll(sel));
   const findBtnByText = (patterns) =>
-    $all("button").find((b) => patterns.some((re) => re.test((b.textContent || "").trim())));
+    $all("button").find(b => patterns.some(re => re.test((b.textContent || "").trim())));
 
-  /* ---------- 开发者模式 ---------- */
+  /* ---------- dev mode ---------- */
   function isDevMode() {
     try {
       const url = new URL(location.href);
       if (url.searchParams.get("dev") === "1") localStorage.setItem("dev", "1");
       return localStorage.getItem("dev") === "1";
-    } catch (e) { return false; }
+    } catch { return false; }
   }
   function applyDevMode() {
     document.body.classList.toggle("yx-devmode", isDevMode());
@@ -31,11 +30,10 @@
     if (!isDevMode()) el.style.display = "none";
   }
 
-  /* ---------- 找“URL 输入 + 一排按钮”的容器（位置兜底） ---------- */
+  /* ---------- toolbar（URL + 按钮） ---------- */
   function findToolbar() {
     const urlInput = document.querySelector("input[type='text'], input");
     if (!urlInput) return null;
-
     const p = urlInput.parentElement;
     if (p) {
       const btns = Array.from(p.querySelectorAll("button"));
@@ -50,36 +48,46 @@
     return null;
   }
 
-  /* ---------- 同父级时：controls 在上，preview 在下 ---------- */
-  function reorderIfSameParent() {
-    const preview = findJsonPreview(); // 仅找到“下方 JSON”
-    const urlInput = document.querySelector("input[type='text'], input");
-    if (!preview || !urlInput) return;
-    const pc = preview.parentElement;
-    const ic = urlInput.parentElement;
-    if (pc && ic && pc === ic) {
-      pc.classList.add("yx-workbench");
-      ic.classList.add("yx-controls");
-      pc.classList.add("yx-preview");
-      log("reorder via class on same parent");
-    }
-  }
-
-  /* ---------- 找“下方 JSON 预览区”（URL 输入之后出现的 pre/textarea） ---------- */
+  /* ---------- controls/preview 的温柔布局 ---------- */
   function findJsonPreview() {
     const urlInput = document.querySelector("input[type='text'], input");
     if (!urlInput) return null;
     const candidates = $all("pre, textarea");
     for (const el of candidates) {
-      // 只取出现在 URL 输入之后的那个（避免拿到顶部的“正文 / Text”）
       const pos = urlInput.compareDocumentPosition(el);
-      const after = (pos & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-      if (after) return el;
+      if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return el;
     }
     return null;
   }
+  function reorderIfSameParent() {
+    const preview = findJsonPreview();
+    const urlInput = document.querySelector("input[type='text'], input");
+    if (!preview || !urlInput) return;
+    const pc = preview.parentElement, ic = urlInput.parentElement;
+    if (pc && ic && pc === ic) {
+      pc.classList.add("yx-workbench");
+      ic.classList.add("yx-controls");
+      pc.classList.add("yx-preview");
+    }
+  }
 
-  /* ---------- 主/次按钮 + 只保留下方 PDF ---------- */
+  /* ---------- 判断一个容器是否含有主流程元素 ---------- */
+  function hasMainControls(container) {
+    if (!container) return false;
+    const txt = (n) => (n.textContent || "").trim();
+    const hasFetch   = !!findInside(container, btn => /抓取|Abrufen|^Fetch$/i.test(txt(btn)));
+    const hasPreview = !!findInside(container, btn => /预览|目录写入|einfügen|Write/i.test(txt(btn)));
+    const hasExcel   = !!findInside(container, btn => /导出\s*Excel|Excel exportieren|Export\s*Excel/i.test(txt(btn)));
+    const hasPdf     = !!findInside(container, btn => /表格\s*PDF|PDF\s*erzeugen|Generate\s*PDF|Tabelle.*PDF/i.test(txt(btn)));
+    const hasInput   = container.querySelector("input[type='text'], input");
+    const hasText    = container.querySelector("textarea");
+    return !!(hasFetch || hasPreview || hasExcel || hasPdf || hasInput || hasText);
+  }
+  function findInside(container, predicate) {
+    return Array.from(container.querySelectorAll("button")).find(predicate);
+  }
+
+  /* ---------- 主/次按钮 + 只保留与 Excel 并列的 PDF ---------- */
   function styleButtons() {
     let btnFetch   = findBtnByText([/抓取|Abrufen|^Fetch$/i]);
     let btnPreview = findBtnByText([/预览|目录写入|einfügen|Write/i]);
@@ -93,54 +101,26 @@
           btnFetch   = btnFetch   || visible[0];
           btnPreview = btnPreview || visible[1];
           btnExcel   = btnExcel   || visible[2];
-          log("fallback by position:", visible.map(b => b.textContent.trim()));
         }
       }
     }
 
-    if (btnFetch)   { btnFetch.classList.add("btn-primary","step"); }
-    if (btnPreview) { btnPreview.classList.add("btn-secondary","step"); }
-    if (btnExcel)   { btnExcel.classList.add("btn-secondary","step"); }
+    if (btnFetch)   btnFetch.classList.add("btn-primary","step");
+    if (btnPreview) btnPreview.classList.add("btn-secondary","step");
+    if (btnExcel)   btnExcel.classList.add("btn-secondary","step");
 
     // 只保留与 Excel 并列的 PDF
     const pdfBtns = $all("button").filter(b => /表格\s*PDF|PDF\s*erzeugen|Generate\s*PDF|Tabelle.*PDF/i.test((b.textContent||"").trim()));
     if (pdfBtns.length) {
       let keep = null;
-      if (btnExcel) {
-        // 保留同父级、位置在 Excel 附近的 PDF
-        keep = pdfBtns.find(b => b.parentElement === btnExcel.parentElement);
-      }
-      keep = keep || pdfBtns[pdfBtns.length - 1]; // 兜底：保留最后一个
-      pdfBtns.forEach(b => {
-        if (b !== keep) {
-          b.remove(); // 直接移除上方重复 PDF
-          log("remove duplicated PDF:", b.textContent.trim());
-        }
-      });
-      if (keep) {
-        keep.classList.add("btn-secondary","is-last");
-        log("keep PDF:", keep.textContent.trim());
-      }
-    }
-
-    // 开发者按钮隐藏（以及整行隐藏）
-    const btnHealth = findBtnByText([/Backend-?Check|健康/i]);
-    const btnPing   = findBtnByText([/^PING/i, /尚未检查/i]);
-    // 整行（包含两者的最近公共祖先）
-    if (btnHealth || btnPing) {
-      const set = new Set();
-      let p = btnHealth ? btnHealth.parentElement : null;
-      while (p && p !== document.body) { set.add(p); p = p.parentElement; }
-      p = btnPing ? btnPing.parentElement : null;
-      let common = null;
-      while (p && p !== document.body) { if (set.has(p)) { common = p; break; } p = p.parentElement; }
-      if (common) { hideDevOnly(common); }
-      hideDevOnly(btnHealth);
-      hideDevOnly(btnPing);
+      if (btnExcel) keep = pdfBtns.find(b => b.parentElement === btnExcel.parentElement);
+      keep = keep || pdfBtns[pdfBtns.length - 1];
+      pdfBtns.forEach(b => { if (b !== keep) b.remove(); });
+      if (keep) keep.classList.add("btn-secondary","is-last");
     }
   }
 
-  /* ---------- 抓取加载态（保持无延迟，快就不显示） ---------- */
+  /* ---------- 抓取加载态（仍保持“快就不显示”） ---------- */
   function installFetchLoading() {
     if (!window.fetch) return;
     const orig = window.fetch.bind(window);
@@ -189,16 +169,29 @@
     };
   }
 
-  /* ---------- 隐藏 API 基址 + 隐藏 JSON 预览（非 dev） ---------- */
+  /* ---------- 隐藏（更保守） ---------- */
   function hideExtraForUser() {
-    // API 基址行
+    // 1) 开发按钮：只隐藏按钮本身；如需再隐藏“近邻容器”，须保证不含主流程元素
+    const btnHealth = findBtnByText([/Backend-?Check|健康/i]);
+    const btnPing   = findBtnByText([/^PING/i, /尚未检查/i]);
+
+    [btnHealth, btnPing].forEach(b => { hideDevOnly(b); });
+
+    [btnHealth, btnPing].forEach(b => {
+      if (!b) return;
+      // 限定在浅层容器里（最多上溯到含有按钮行的块级元素）
+      const wrapper = b.closest("div,section,article,p") || b.parentElement;
+      if (wrapper && !hasMainControls(wrapper)) hideDevOnly(wrapper);
+    });
+
+    // 2) API 基址：只隐藏“包含 API 基址文字”的那个节点（不再隐藏祖先）
     try {
       const nodes = $all("body *");
-      const hit = nodes.find(n => /API\s*基址|API\s*Basis/i.test((n.textContent || "").trim()));
-      if (hit) hideDevOnly(hit);
-    } catch (e) {}
+      const apiNode = nodes.find(n => /API\s*基址|API\s*Basis/i.test((n.textContent || "").trim()));
+      if (apiNode) hideDevOnly(apiNode);
+    } catch {}
 
-    // 下方 JSON 预览
+    // 3) 下方 JSON 预览（URL 输入后出现的 pre/textarea）
     const jsonEl = findJsonPreview();
     if (jsonEl) hideDevOnly(jsonEl);
   }
@@ -235,4 +228,4 @@
   } else {
     boot();
   }
-})(); // EOF v3.2
+})(); // EOF v3.3
