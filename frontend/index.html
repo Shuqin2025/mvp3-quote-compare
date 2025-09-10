@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Baseline Smoke Test - MVP3</title>
+  <title>MVP3 Quote Compare</title>
   <style>
     body { font-family: sans-serif; margin: 24px; }
     #langSwitcher { margin-bottom: 16px; display: flex; gap: 8px; }
     #langSwitcher button { padding: 6px 10px; }
-    .ok { padding: 12px; background: #f2fff2; border: 1px solid #b6e3b6; }
   </style>
 </head>
 <body>
@@ -18,9 +17,10 @@
     <button>🇬🇧 English</button>
   </div>
 
-  <h2>MVP3 — Baseline</h2>
-  <p class="ok">页面已加载（baseline）。如果你能看到这段文字，说明线上正在使用你刚替换的 <code>index.html</code>。</p>
+  <h2>MVP3 — React Load Test</h2>
+  <div id="root"></div>
 
-  <noscript style="color:#c00">当前浏览器禁用了 JavaScript。</noscript>
+  <!-- React/Vite 打包产物（你之前源码里看到的名字 index-B9oKRFVn.js） -->
+  <script type="module" crossorigin src="/assets/index-B9oKRFVn.js"></script>
 </body>
 </html>
