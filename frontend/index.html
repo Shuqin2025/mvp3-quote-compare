@@ -11,21 +11,28 @@
     #langSwitcher button { padding: 4px 8px; }
   </style>
 
-  <link rel="stylesheet" href="/ui-enhance.css?v=34" />
+  <!-- UI 样式（版本号用来强制刷新缓存） -->
+  <link rel="stylesheet" href="/ui-enhance.css?v=36" />
 </head>
 <body>
+  <!-- 语言切换器（只设置语言，不改 UI 文案；文案由 i18n.js 在页面运行后接管） -->
   <div id="langSwitcher">
     <button onclick="i18n.setLang('zh')">🇨🇳 中文</button>
     <button onclick="i18n.setLang('de')">🇩🇪 Deutsch</button>
     <button onclick="i18n.setLang('en')">🇬🇧 English</button>
   </div>
 
+  <!-- React App 挂载点 -->
   <div id="root"></div>
 
-  <script src="/i18n.js?v=34"></script>
-  <script src="/lang-fetch.js?v=34"></script>
-  <script src="/ui-enhance.js?v=34"></script>
+  <!-- 语言状态（安全） -->
+  <script src="/i18n.js?v=36"></script>
+  <!-- 仅给导出时口径自动带语言（安全） -->
+  <script src="/lang-fetch.js?v=36"></script>
+  <!-- UI 增强脚本（隐藏开发区块、主/次按钮、只保留下方 PDF、?dev=1 显示开发内容 等） -->
+  <script src="/ui-enhance.js?v=36"></script>
 
+  <!-- Vite / React 入口（请务必保留；构建时会被替换成 /assets/index-*.js） -->
   <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>
