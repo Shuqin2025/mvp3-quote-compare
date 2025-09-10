@@ -11,30 +11,30 @@
     #langSwitcher button { padding: 4px 8px; }
   </style>
 
-  <!-- UI 增强样式（隐藏开发者区块、主/次按钮样式等） -->
-  <link rel="stylesheet" href="/ui-enhance.css?v=38" />
+  <!-- 仅加载我们放在 /frontend/public 下的轻量增强样式/脚本；不加载 /assets/*.js -->
+  <link rel="stylesheet" href="/ui-enhance.css?v=34" />
 </head>
 <body>
-  <!-- 语言切换，仅设置语言，不改 UI 文案；文案由 i18n.js 在页面运行后接管 -->
+
+  <!-- 语言切换（只设置语言，不改 UI 文案；文案由 i18n.js 在页面运行后替换） -->
   <div id="langSwitcher">
-    <button onclick="i18n.setLang('zh')">🇨🇳 中文</button>
-    <button onclick="i18n.setLang('de')">🇩🇪 Deutsch</button>
-    <button onclick="i18n.setLang('en')">🇬🇧 English</button>
+    <button onclick="i18n.setLang('zh')">CN 中文</button>
+    <button onclick="i18n.setLang('de')">DE Deutsch</button>
+    <button onclick="i18n.setLang('en')">GB English</button>
   </div>
 
-  <!-- React App 挂载点 -->
+  <!-- 挂载区：这里如果后续切回 Vite 构建，可以作为 React root -->
   <div id="root"></div>
 
-  <!-- 语言状态（安全）：仅设置/记忆语言；不阻塞页面 -->
-  <script src="/i18n.js?v=38"></script>
-  <script src="/lang-fetch.js?v=38"></script>
+  <!-- 语言相关（安全）-->
+  <script src="/i18n.js?v=34"></script>
+  <script src="/lang-fetch.js?v=34"></script>
 
-  <!-- UI 增强脚本（隐藏开发开关、按钮主次样式、只保留底部 PDF、?dev=1 显示调试块等） -->
-  <script src="/ui-enhance.js?v=38"></script>
+  <!-- UI 增强脚本（隐藏开发块/按钮行/API 基址/原始 JSON；?dev=1 显示） -->
+  <script src="/ui-enhance.js?v=34"></script>
 
-  <!-- ✅ 正确的 Vite 入口：指向源码，build 时会被替换为 /assets/*.js -->
-  <script type="module" src="/src/main.jsx"></script>
-
-  <noscript style="color:#c00">JavaScript 被禁用，页面功能无法使用。</noscript>
+  <!-- ！！！不要引入 Vite 构建产物；否则白屏
+  <script type="module" crossorigin src="/assets/index-xxxx.js"></script>
+  -->
 </body>
 </html>
