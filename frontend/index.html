@@ -1,34 +1,60 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MVP3 Quote Compare</title>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MVP3 — Baseline</title>
+  <style>
+    :root { --fg:#111; --muted:#6b7280; --edge:#e5e7eb; --bg:#fff; --chip:#f3f4f6; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; color: var(--fg); background: var(--bg);
+      font: 16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans",
+            "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+    }
+    #langSwitcher { padding: 16px; display: flex; gap: 8px; }
+    #langSwitcher .chip {
+      border: 1px solid var(--edge); background: var(--chip);
+      padding: 6px 10px; border-radius: 6px; cursor: default;
+    }
+    main { max-width: 980px; margin: 24px auto; padding: 0 16px; }
+    h1 { margin: 0 0 16px; font-size: 28px; }
+    .notice {
+      padding: 12px 14px; border: 1px solid #a7f3d0; background: #ecfdf5;
+      color: #065f46; border-radius: 8px; margin: 16px 0 28px;
+    }
+    section { border-top: 1px dashed var(--edge); padding-top: 20px; }
+    .muted { color: var(--muted); }
+    code { background: #f9fafb; border: 1px solid var(--edge); padding: 0 4px; border-radius: 4px; }
+    footer { margin: 40px 0 24px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <!-- 语言切换按钮（占位；无 JS，仅用于视觉确认） -->
+  <nav id="langSwitcher" aria-label="Language Switcher">
+    <span class="chip" data-i18n="lang.zh">CN 中文</span>
+    <span class="chip" data-i18n="lang.de">DE Deutsch</span>
+    <span class="chip" data-i18n="lang.en">GB English</span>
+  </nav>
 
-    <style>
-      body { font-family: sans-serif; margin: 1em; }
-      #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
-      #langSwitcher button { padding: 4px 8px; }
-    </style>
-
-    <!-- 来自 public/，构建后会出现在 dist/ 根目录 -->
-    <link rel="stylesheet" href="/ui-enhance.css?v=36" />
-  </head>
-  <body>
-    <div id="langSwitcher">
-      <button onclick="i18n.setLang('zh')">CN 中文</button>
-      <button onclick="i18n.setLang('de')">DE Deutsch</button>
-      <button onclick="i18n.setLang('en')">GB English</button>
+  <main>
+    <h1>MVP3 — Baseline</h1>
+    <div class="notice">
+      页面已加载（baseline）。如果你能看到这段文字，说明线上正在使用你刚替换的
+      <code>frontend/index.html</code>（纯静态，无任何脚本或打包资源）。
     </div>
 
-    <div id="root"></div>
+    <section>
+      <h2>占位区 / Placeholder</h2>
+      <p class="muted">
+        当前文件不加载 React/Vite 产物，仅用于验证发布目录与缓存。确认没问题后，再切回构建产物版本。
+      </p>
+    </section>
 
-    <!-- 同在 public/，构建后也在 dist/ 根目录 -->
-    <script src="/i18n.js?v=36"></script>
-    <script src="/lang-fetch.js?v=36"></script>
-    <script src="/ui-enhance.js?v=36"></script>
-
-    <!-- Vite 开发/构建入口：构建时自动变更为 /assets/index-*.js -->
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+    <footer>
+      © MVP3 – Baseline check. No scripts loaded.
+    </footer>
+  </main>
+</body>
 </html>
