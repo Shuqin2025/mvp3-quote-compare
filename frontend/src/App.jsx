@@ -1,171 +1,291 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 /**
- * MVP3 – 最小可用版抓取页
- * - 从 URL 读取 ?api= 作为后端基址
- * - 输入目录页 URL，点击按钮 -> fetch 后端 -> 在下方预览 JSON
- * - 所有关键步骤都有 console.log，便于你在 DevTools 里观察
+ * MVP3 — 升级占位壳（接入抓取 + 预览 + 导出CSV）
+ * - API_BASE 读取顺序：URL ?api=xxx > import.meta.env.VITE_API_BASE > ""
+ * - 按钮：抓取目录（启用）、预览（只显示前 50 条）、导出 Excel（CSV 版本）、生成 PDF（禁用）
+ * - 与 public/i18n.js、lang-fetch.js、ui-enhance.js 共存
  */
 
 export default function App() {
-  // 1) 读取 ?api=（后端基址）
+  // 1) 解析 API 基址（避免可选链，最大兼容）
   const API_BASE = useMemo(() => {
+    function envApi() {
+      try {
+        const v = (import.meta && import.meta.env && import.meta.env.VITE_API_BASE) || "";
+        return String(v).trim();
+      } catch {
+        return "";
+      }
+    }
     try {
       const u = new URL(window.location.href);
-      const v = (u.searchParams.get("api") || "").trim().replace(/\/+$/, "");
-      return v;
+      const q = (u.searchParams.get("api") || "").trim();
+      const e = envApi();
+      const base = q || e || "";
+      console.log("[mvp3] App loaded. API_BASE =", base || "(empty)");
+      return base;
     } catch {
-      return "";
+      const e = envApi();
+      console.log("[mvp3] App loaded. API_BASE =", e || "(empty)");
+      return e || "";
     }
   }, []);
 
-  const [catalogUrl, setCatalogUrl] = useState("");
-  const [preview, setPreview] = useState("");
+  // 2) 页面状态
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [hint, setHint] = useState("");        // 顶部提示（成功/错误）
+  const [url, setUrl] = useState("");          // 目录页 URL 输入
+  const [raw, setRaw] = useState(null);        // 后端原始 JSON（留给后续）
+  const [preview, setPreview] = useState([]);  // 预览（前 50 条）
 
-  const handleScrape = async () => {
-    setError("");
-    setPreview("");
+  // 3) ui-enhance 开发者 UI/语言切换挂载（与旧脚本配合）
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      try {
+        if (window.uiEnhance && typeof window.uiEnhance.mount === "function") {
+          window.uiEnhance.mount();
+        }
+      } catch {}
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  // 4) 发起目录抓取
+  async function onFetchCatalog() {
+    setHint("");
 
     if (!API_BASE) {
-      setError("缺少 ?api= 后端基址参数，例如 ?api=https://yunivera-mvp2-cwyr.onrender.com");
-      console.warn("[mvp3] missing API_BASE (?api=)", API_BASE);
+      setHint("未配置 API_BASE：请在 URL 上加 ?api=https://你的后端域名 或设置 VITE_API_BASE。");
       return;
     }
-    if (!catalogUrl) {
-      setError("请先在输入框粘贴目录页 URL");
+    if (!url || !url.trim()) {
+      setHint("请先输入要抓取的目录页 URL。");
       return;
     }
 
-    // ======= 按你的后端路由改这一行 =======
-    // 常见形态：/export?url=、/api/export?url=、/scrape?url=
-    const endpoint = `${API_BASE}/export?url=${encodeURIComponent(catalogUrl)}&limit=50`;
-    // ====================================
+    const endpoint =
+      API_BASE.replace(/\/+$/, "") +
+      "/v1/api/catalog/parse?url=" +
+      encodeURIComponent(url.trim());
 
-    console.log("[mvp3] fetching:", endpoint);
+    console.log("[mvp3] fetch:", endpoint);
     setBusy(true);
     try {
       const res = await fetch(endpoint, { method: "GET" });
-      console.log("[mvp3] status:", res.status, res.statusText);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      setRaw(data);
 
-      const text = await res.text(); // 先拿纯文本，便于看见服务端报错
-      console.log("[mvp3] raw:", text);
+      const arr = Array.isArray(data && data.products)
+        ? data.products
+        : Array.isArray(data)
+        ? data
+        : [];
 
-      // 尝试解析 JSON（如果不是 JSON 也显示原文，方便排障）
-      try {
-        const json = JSON.parse(text);
-        setPreview(JSON.stringify(json, null, 2));
-      } catch {
-        setPreview(text);
-      }
-    } catch (e) {
-      console.error("[mvp3] fetch error:", e);
-      setError(String(e));
+      const top50 = arr.slice(0, 50);
+      setPreview(top50);
+
+      setHint("抓取成功：共 " + arr.length + " 条（预览前 50 条）");
+    } catch (err) {
+      console.error(err);
+      setRaw(null);
+      setPreview([]);
+      setHint("抓取失败：" + (err && err.message ? err.message : "Unknown error"));
     } finally {
       setBusy(false);
     }
-  };
+  }
 
+  // 5) 导出 CSV（简版 Excel）
+  function onExportCSV() {
+    if (!preview.length) {
+      setHint("没有可导出的数据，请先抓取。");
+      return;
+    }
+    const fields = pickColumns(preview);
+    const rows = [fields.join(",")];
+    for (let i = 0; i < preview.length; i++) {
+      const item = preview[i] || {};
+      const line = fields
+        .map((k) => {
+          let v = item[k];
+          if (v == null) v = "";
+          const s = String(v).replace(/\r?\n/g, " ").replace(/"/g, '""');
+          return `"${s}"`;
+        })
+        .join(",");
+      rows.push(line);
+    }
+    const csv = rows.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download =
+      "catalog-preview-" +
+      new Date().toISOString().slice(0, 19).replace(/[:T]/g, "") +
+      ".csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function pickColumns(list) {
+    const candidates = [
+      "title", "name", "sku", "price", "currency", "url", "img", "preview", "source",
+    ];
+    const first = list[0] || {};
+    const keys = Object.keys(first);
+    const picked = candidates.filter((k) => keys.indexOf(k) >= 0);
+    return picked.length ? picked : keys.slice(0, 6);
+  }
+
+  // —— UI —— //
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "22px" }}>
-      {/* 多语言切换按钮（占位） */}
-      <div id="langSwitcher" style={{ margin: "1rem 0", display: "flex", gap: 8 }}>
-        <button onClick={() => (document.querySelector("[data-i18n='title_app']").textContent = "MVP3 — App")}>
-          CN 中文
-        </button>
-        <button onClick={() => (document.querySelector("[data-i18n='title_app']").textContent = "MVP3 — App (DE)")}>
-          DE Deutsch
-        </button>
-        <button onClick={() => (document.querySelector("[data-i18n='title_app']").textContent = "MVP3 — App (EN)")}>
-          GB English
-        </button>
-      </div>
+      {/* 标题 */}
+      <h1 data-i18n="title_app" style={{ margin: "0 0 12px" }}>MVP3 — App</h1>
 
-      <h1 data-i18n="title_app" style={{ margin: "0 0 12px" }}>
-        MVP3 — App
-      </h1>
+      {/* 页面说明条 */}
+      <div style={{
+        background: "#eaf9e6",
+        border: "1px solid #b5e5a1",
+        padding: "10px 12px",
+        borderRadius: 6,
+        color: "#2a6120",
+        marginBottom: 16,
+      }}>
+        这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。
+      </div>
 
       {/* 顶部提示 */}
-      <div
-        style={{
-          background: "#e8f7e9",
-          border: "1px solid #93d39a",
-          padding: "12px 16px",
+      {hint ? (
+        <div style={{
+          background: "#fffceb",
+          border: "1px solid #ffe58f",
+          padding: "8px 12px",
           borderRadius: 6,
+          color: "#8b6d00",
           marginBottom: 12,
-        }}
-      >
-        <div>这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。</div>
-        <div style={{ marginTop: 6 }}>
-          当前后端 API 基址：<code>{API_BASE || "(未配置 ?api= …)"}</code>
+        }}>
+          {hint}
         </div>
+      ) : null}
+
+      {/* 工具条 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <strong>目录抓取（占位）</strong>
       </div>
 
-      {/* 错误提示 */}
-      {error && (
-        <div
+      {/* 操作行 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="粘贴要抓取的目录页 URL（例如某电商分类页）"
           style={{
-            background: "#fdecea",
-            border: "1px solid #f5c2c0",
-            padding: "10px 12px",
+            flex: 1,
+            minWidth: 260,
+            padding: "8px 10px",
+            border: "1px solid #d9d9d9",
             borderRadius: 6,
-            color: "#a40",
-            marginBottom: 12,
           }}
-        >
-          {error}
-        </div>
-      )}
-
-      {/* 输入 + 按钮区 */}
-      <div style={{ background: "#fff8e1", border: "1px solid #ecdca2", padding: 12, borderRadius: 6, marginBottom: 18 }}>
-        <div style={{ marginBottom: 10, fontWeight: 600 }}>目录抓取（占位）</div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <input
-            style={{
-              flex: 1,
-              padding: "10px 12px",
-              border: "1px solid #bbb",
-              borderRadius: 6,
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-            }}
-            placeholder="请粘贴要抓取的目录页 URL…"
-            value={catalogUrl}
-            onChange={(e) => setCatalogUrl(e.target.value)}
-          />
-          <button onClick={handleScrape} disabled={busy} style={{ padding: "10px 16px" }}>
-            {busy ? "抓取中..." : "抓取目录"}
-          </button>
-        </div>
+        />
+        <button onClick={onFetchCatalog} disabled={busy} style={btnPrimary}>
+          {busy ? "抓取中…" : "抓取目录"}
+        </button>
+        <button disabled title="预览会在下方展示，按钮仅为引导" style={btn}>预览（前 50 条）</button>
+        <button onClick={onExportCSV} disabled={!preview.length} style={btn}>导出 Excel</button>
+        <button disabled title="稍后接回 PDF 生成功能" style={btn}>生成 PDF</button>
       </div>
 
-      {/* 结果预览 */}
-      <div style={{ marginTop: 12 }}>
-        <div style={{ marginBottom: 8, fontWeight: 600 }}>抓取结果预览区</div>
-        <pre
-          style={{
-            minHeight: 260,
-            background:
-              preview.trim() === ""
-                ? "repeating-linear-gradient(45deg,#fafafa,#fafafa 12px,#f3f3f3 12px,#f3f3f3 24px)"
-                : "#0b1020",
-            color: preview.trim() === "" ? "#999" : "#e6f3ff",
-            border: "1px dashed #ddd",
-            borderRadius: 8,
-            padding: 16,
-            overflow: "auto",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          {preview || "（等待抓取结果……）"}
-        </pre>
+      {/* 预览卡片 */}
+      <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 16, marginBottom: 24 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>抓取结果预览区</div>
+        {!preview.length ? <EmptyStripe /> : <PreviewTable list={preview} />}
       </div>
 
-      <div style={{ marginTop: 22, color: "#666" }}>
-        © MVP3 — 页面骨架（占位版）。确认部署稳定后，再逐步接回业务逻辑。
+      <div style={{ color: "#888" }}>
+        © MVP3 — 页面骨架（占位版）。确认部署稳定后，将逐步接回业务逻辑。
       </div>
     </div>
   );
 }
+
+function EmptyStripe() {
+  return (
+    <div
+      style={{
+        height: 260,
+        border: "1px dashed #ddd",
+        borderRadius: 8,
+        background:
+          "repeating-linear-gradient(-45deg, #fafafa, #fafafa 10px, #f2f2f2 10px, #f2f2f2 20px)",
+      }}
+    />
+  );
+}
+
+function PreviewTable({ list }) {
+  const columns = (() => {
+    const candidates = ["title","name","sku","price","currency","url","img","preview","source"];
+    const keys = Object.keys(list[0] || {});
+    const picked = candidates.filter((k) => keys.indexOf(k) >= 0);
+    return (picked.length ? picked : keys.slice(0, 6)).slice(0, 6);
+  })();
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>{columns.map((c) => <th key={c} style={thtd(true)}>{c}</th>)}</tr>
+        </thead>
+        <tbody>
+          {list.map((row, i) => (
+            <tr key={i}>
+              {columns.map((c) => (
+                <td key={c} style={thtd()}>
+                  {renderCell(row && row[c])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ color: "#999", marginTop: 8 }}>仅展示前 50 条。</div>
+    </div>
+  );
+}
+
+function renderCell(v) {
+  if (v == null) return "";
+  const s = String(v);
+  if (/^https?:\/\//i.test(s)) return <a href={s} target="_blank" rel="noreferrer">链接</a>;
+  return s.length > 120 ? s.slice(0, 117) + "..." : s;
+}
+
+function thtd(isTh) {
+  return {
+    textAlign: "left",
+    padding: "8px",
+    borderBottom: "1px solid #eee",
+    background: isTh ? "#fafafa" : "#fff",
+    whiteSpace: "nowrap",
+  };
+}
+
+const btnPrimary = {
+  padding: "8px 12px",
+  borderRadius: 6,
+  border: "1px solid #1677ff",
+  background: "#1677ff",
+  color: "#fff",
+  cursor: "pointer",
+};
+const btn = {
+  padding: "8px 12px",
+  borderRadius: 6,
+  border: "1px solid #d9d9d9",
+  background: "#fff",
+  cursor: "pointer",
+};
