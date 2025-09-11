@@ -1,178 +1,175 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 
 /**
- * MVP3 – UI骨架（空壳，方便逐步接回功能）
- * - 只渲染结构、id、data-i18n，不做任何真实调用
- * - 语言切换与“开发者模式”交给 public/ui-enhance.js 处理
- * - 后续把真实逻辑按模块逐步接回（抓取 / 预览 / 导出）
+ * MVP3 — 页面骨架（纯静态，无业务逻辑 / 无接口）
+ * - 保留简洁 UI：头部、工具栏、主内容区(预览)、侧栏(开发者面板)、页脚
+ * - 文案均加 data-i18n，后续接入 i18n.js 可直接切换三语
+ * - dev 面板：地址栏加 ?dev=1 可见（仅占位，不依赖任何接口）
  */
 export default function App() {
-  // 仅用于“页面上显示 API 基址” —— 读取环境或 URL 覆盖（不做请求）
-  const apiBase = useMemo(() => {
+  // 是否显示开发者面板（占位），仅当 ?dev=1 时显示
+  const showDevPanel = useMemo(() => {
     try {
       const u = new URL(window.location.href);
-      const fromQuery = u.searchParams.get("api")?.trim();
-      // Render 的环境变量（若你在 vite.config 有 define，也可在此挂载 import.meta.env）
-      const fromEnv =
-        (import.meta?.env?.VITE_API_BASE?.trim?.() ?? "") ||
-        (import.meta?.env?.VITE_API_URL?.trim?.() ?? "");
-      return (fromQuery || fromEnv || "").trim();
+      return (u.searchParams.get("dev") || "").trim() === "1";
     } catch {
-      return "";
+      return false;
     }
-  }, []);
-
-  // 让 ui-enhance 接管语言切换、开发者模式开关、按钮主次风格等
-  useEffect(() => {
-    // 延迟到下一帧，确保节点都在
-    const t = requestAnimationFrame(() => {
-      if (window?.uiEnhance?.mount) window.uiEnhance.mount();
-    });
-    return () => cancelAnimationFrame(t);
   }, []);
 
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "22px" }}>
       {/* 顶部标题 */}
-      <h1 data-i18n="title_app" style={{ margin: "0 0 12px" }}>
-        MVP3 — App
-      </h1>
+      <header style={{ margin: "0 0 12px" }}>
+        <h1 data-i18n="title.app" style={{ margin: "0 0 12px" }}>
+          MVP3 — App
+        </h1>
+        <p data-i18n="hint.react_ok" style={{ margin: 0, color: "#666" }}>
+          如果你看到这段话，说明 React/Vite 已成功挂载到 #root。
+        </p>
+      </header>
 
-      {/* 绿色提示（baseline 期间仍保留，后续可移除） */}
-      <div
-        role="note"
-        aria-live="polite"
+      {/* 状态条（占位，后续可替换为业务性的提醒或 banner） */}
+      <section
+        aria-label="status"
         style={{
-          background: "#f0fae0",
-          border: "1px solid #b6e56d",
+          background: "#f0faf0",
+          border: "1px solid #d6eed6",
           padding: "12px 14px",
           borderRadius: 6,
-          marginBottom: 18,
+          margin: "16px 0 18px",
         }}
       >
-        <span data-i18n="baseline_hint">
-          如果你能看到这个页面，说明前端框架已就绪（React/Vite + i18n +
-          UI增强）。
+        <span data-i18n="banner.placeholder">
+          这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。
         </span>
-      </div>
-
-      {/* 文本区（正文 / Text） */}
-      <section aria-labelledby="secText">
-        <div style={{ marginBottom: 6, display: "flex", alignItems: "center", gap: 10 }}>
-          <strong id="secText" data-i18n="section_text">
-            正文 / Text
-          </strong>
-        </div>
-
-        <textarea
-          id="txt"
-          aria-labelledby="secText"
-          placeholder=""
-          data-i18n-placeholder="txt_placeholder"
-          style={{
-            width: "100%",
-            height: 260,
-            resize: "vertical",
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-            fontSize: 13,
-            lineHeight: 1.6,
-            padding: 10,
-            borderRadius: 6,
-            border: "1px solid #ddd",
-          }}
-        />
-
-        {/* 按钮工具条（主/次风格由 ui-enhance 接管） */}
-        <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {/* 仅开发者模式显示：后端健康检查 & PING */}
-          <button id="btn-backend-check" className="dev-only" data-i18n="btn_backend_check">
-            后端健康检查 / Backend-Check
-          </button>
-          <span className="dev-only" id="ping" data-i18n="ping_badge">
-            [PING] 尚未检查
-          </span>
-
-          {/* 生成 PDF（保留一个） */}
-          <button id="btn-generate-pdf" data-i18n="btn_pdf">
-            生成 PDF / PDF erzeugen
-          </button>
-        </div>
-
-        {/* API 基址（开发者模式显示） */}
-        <div className="dev-only" style={{ marginTop: 8, color: "#6c6c6c" }}>
-          <small>
-            <span data-i18n="api_basis">API 基址 / API-Basis</span>：{" "}
-            <code id="api-base-text">{apiBase || "-"}</code>
-          </small>
-        </div>
       </section>
 
-      {/* 目录抓取 Demo */}
-      <section aria-labelledby="secCatalog" style={{ marginTop: 22 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <strong id="secCatalog" data-i18n="section_catalog">
-            目录抓取 Demo（/v1/api/catalog/parse）
-          </strong>
+      {/* 顶部工具栏（按钮均为占位，禁用态。第 3 步再接业务） */}
+      <section
+        aria-label="toolbar"
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
+        <div
+          data-i18n="toolbar.title"
+          style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}
+        >
+          目录抓取（占位）
         </div>
 
-        {/* URL 输入与操作按钮 */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-          <input
-            id="catalogUrl"
-            type="text"
-            defaultValue=""
-            data-i18n-placeholder="catalog_placeholder"
-            placeholder="https://example.com"
-            style={{
-              flex: "1 1 520px",
-              minWidth: 280,
-              height: 34,
-              padding: "0 10px",
-              borderRadius: 6,
-              border: "1px solid #ddd",
-              fontSize: 14,
-            }}
-          />
-          <button id="btn-fetch-catalog" data-i18n="btn_fetch">
+        <div style={{ display: "flex", gap: 8 }}>
+          <button data-i18n="btn.fetch" disabled title="占位">
             抓取目录
           </button>
-          <button id="btn-preview" data-i18n="btn_preview">
-            目录写入正文（前 50 条）
+          <button data-i18n="btn.preview" disabled title="占位">
+            预览（前 50 条）
           </button>
-          <span aria-hidden="true" style={{ opacity: 0.6 }}>→</span>
-          <button id="btn-export-excel" data-i18n="btn_excel">
+          <span aria-hidden>→</span>
+          <button data-i18n="btn.excel" disabled title="占位">
             导出 Excel
           </button>
-          <button id="btn-export-pdf" data-i18n="btn_pdf2">
-            表格 PDF
+          <button data-i18n="btn.pdf" disabled title="占位">
+            生成 PDF
           </button>
         </div>
-
-        {/* 结果预览（原始 JSON）—— 仅开发者模式显示 */}
-        <textarea
-          id="result"
-          className="dev-only"
-          data-i18n-placeholder="json_result_placeholder"
-          placeholder="目录抓取结果 JSON 会显示在这里"
-          style={{
-            width: "100%",
-            height: 300,
-            resize: "vertical",
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-            fontSize: 13,
-            lineHeight: 1.5,
-            padding: 10,
-            borderRadius: 6,
-            border: "1px solid #ddd",
-          }}
-        />
       </section>
 
-      {/* 页脚（可放支持站点 / 隐私政策 / 联系） */}
-      <footer style={{ marginTop: 26, opacity: 0.75 }}>
-        <small id="footer-links" data-i18n="footer_links">
-          支持的网站 · 隐私政策 · 联系我们
-        </small>
+      {/* 主体两列布局：左侧预览区 + 右侧（可选）开发者面板 */}
+      <main
+        style={{
+          display: "grid",
+          gridTemplateColumns: showDevPanel ? "1fr 300px" : "1fr",
+          gap: 16,
+          alignItems: "start",
+        }}
+      >
+        {/* 左侧：抓取结果预览区（大块占位） */}
+        <section
+          aria-label="preview"
+          style={{
+            border: "1px solid #e6e6e6",
+            borderRadius: 8,
+            minHeight: 360,
+            padding: 14,
+            background: "#fff",
+          }}
+        >
+          <div
+            data-i18n="card.preview.title"
+            style={{ fontWeight: 600, marginBottom: 8 }}
+          >
+            抓取结果预览区
+          </div>
+          <div
+            data-i18n="card.preview.desc"
+            style={{ color: "#888", fontSize: 14 }}
+          >
+            占位区域：后续将显示抓取返回的 JSON 简要预览、或转成表格后的展示。
+          </div>
+
+          <div
+            style={{
+              marginTop: 12,
+              border: "1px dashed #d7d7d7",
+              borderRadius: 6,
+              minHeight: 280,
+              background:
+                "repeating-linear-gradient(45deg, #fafafa, #fafafa 10px, #f5f5f5 10px, #f5f5f5 20px)",
+            }}
+          />
+        </section>
+
+        {/* 右侧：开发者面板（仅 ?dev=1 显示，占位） */}
+        {showDevPanel && (
+          <aside
+            aria-label="dev-panel"
+            style={{
+              border: "1px solid #e6e6e6",
+              borderRadius: 8,
+              padding: 14,
+              background: "#fff",
+            }}
+          >
+            <div
+              data-i18n="card.dev.title"
+              style={{ fontWeight: 600, marginBottom: 8 }}
+            >
+              开发者面板（dev=1）
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18, color: "#666", lineHeight: 1.8 }}>
+              <li data-i18n="card.dev.item.env">
+                这里可以放环境变量与接口基址（后续接入）。
+              </li>
+              <li data-i18n="card.dev.item.ping">
+                可在此添加健康检查 /ping（后续接入）。
+              </li>
+              <li data-i18n="card.dev.item.logs">
+                也可打印关键信息用于排查问题（后续接入）。
+              </li>
+            </ul>
+          </aside>
+        )}
+      </main>
+
+      {/* 页脚占位 */}
+      <footer
+        style={{
+          marginTop: 28,
+          paddingTop: 12,
+          borderTop: "1px solid #eee",
+          color: "#999",
+          fontSize: 13,
+        }}
+      >
+        <span data-i18n="footer.note">
+          © MVP3 — 页面骨架（占位版）。确认部署稳定后，将逐步接回业务逻辑。
+        </span>
       </footer>
     </div>
   );
