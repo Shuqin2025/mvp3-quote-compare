@@ -1,18 +1,20 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 /**
- * MVP3 — 升级占位壳（接入抓取 + 预览 + 导出CSV）
+ * MVP3 — 升级壳（抓取 + 预览 + 导出 .xlsx）
  * - API_BASE 读取顺序：URL ?api=xxx > import.meta.env.VITE_API_BASE > ""
- * - 按钮：抓取目录（启用）、预览（只显示前 50 条）、导出 Excel（CSV 版本）、生成 PDF（禁用）
- * - 与 public/i18n.js、lang-fetch.js、ui-enhance.js 共存
+ * - 按钮：抓取目录、预览（仅展示前 50 条）、导出 Excel（.xlsx）、生成 PDF（占位禁用）
+ * - 仍与 public/i18n.js、lang-fetch.js、ui-enhance.js 共存
  */
 
 export default function App() {
-  // 1) 解析 API 基址（避免可选链，最大兼容）
+  // 1) 解析 API 基址
   const API_BASE = useMemo(() => {
     function envApi() {
       try {
-        const v = (import.meta && import.meta.env && import.meta.env.VITE_API_BASE) || "";
+        const v =
+          (import.meta && import.meta.env && import.meta.env.VITE_API_BASE) ||
+          "";
         return String(v).trim();
       } catch {
         return "";
@@ -39,7 +41,7 @@ export default function App() {
   const [raw, setRaw] = useState(null);        // 后端原始 JSON（留给后续）
   const [preview, setPreview] = useState([]);  // 预览（前 50 条）
 
-  // 3) ui-enhance 开发者 UI/语言切换挂载（与旧脚本配合）
+  // 3) ui-enhance：开发者 UI/语言切换挂载
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       try {
@@ -86,7 +88,7 @@ export default function App() {
       const top50 = arr.slice(0, 50);
       setPreview(top50);
 
-      setHint("抓取成功：共 " + arr.length + " 条（预览前 50 条）");
+      setHint(`抓取成功：共 ${arr.length} 条（预览前 50 条）`);
     } catch (err) {
       console.error(err);
       setRaw(null);
@@ -97,47 +99,70 @@ export default function App() {
     }
   }
 
-  // 5) 导出 CSV（简版 Excel）
-  function onExportCSV() {
-    if (!preview.length) {
-      setHint("没有可导出的数据，请先抓取。");
-      return;
-    }
-    const fields = pickColumns(preview);
-    const rows = [fields.join(",")];
-    for (let i = 0; i < preview.length; i++) {
-      const item = preview[i] || {};
-      const line = fields
-        .map((k) => {
-          let v = item[k];
-          if (v == null) v = "";
-          const s = String(v).replace(/\r?\n/g, " ").replace(/"/g, '""');
-          return `"${s}"`;
-        })
-        .join(",");
-      rows.push(line);
-    }
-    const csv = rows.join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download =
-      "catalog-preview-" +
-      new Date().toISOString().slice(0, 19).replace(/[:T]/g, "") +
-      ".csv";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
-
+  // 5) 列优先级（导出 & 表格展示共用）
   function pickColumns(list) {
-    const candidates = [
+    const preferred = [
       "title", "name", "sku", "price", "currency", "url", "img", "preview", "source",
     ];
     const first = list[0] || {};
     const keys = Object.keys(first);
-    const picked = candidates.filter((k) => keys.indexOf(k) >= 0);
-    return picked.length ? picked : keys.slice(0, 6);
+    const picked = preferred.filter((k) => keys.includes(k));
+    return picked.length ? picked : keys.slice(0, 8);
+  }
+
+  // 6) 导出 .xlsx
+  function onExportXLSX() {
+    if (!preview.length) {
+      setHint("没有可导出的数据，请先抓取。");
+      return;
+    }
+    if (!window.XLSX || !window.XLSX.utils) {
+      setHint("未加载 XLSX 库，请刷新页面或检查 index.html 中的 CDN 脚本。");
+      return;
+    }
+
+    const cols = pickColumns(preview);
+
+    // 规范化：把非基本类型（数组/对象）转成字符串，避免 Excel 显示 [object Object]
+    const rows = preview.map((item) => {
+      const out = {};
+      cols.forEach((k) => {
+        let v = item?.[k];
+        if (v == null) v = "";
+        if (typeof v === "object") {
+          try {
+            if (Array.isArray(v)) v = v.join(", ");
+            else v = JSON.stringify(v);
+          } catch {
+            v = String(v);
+          }
+        }
+        out[k] = String(v);
+      });
+      return out;
+    });
+
+    const wb = window.XLSX.utils.book_new();
+    const ws = window.XLSX.utils.json_to_sheet(rows, { header: cols });
+
+    // 自动设置列宽（按字符数估算）
+    const colWidths = cols.map((k) => {
+      const maxLen = Math.max(
+        k.length,
+        ...rows.map((r) => (r[k] ? String(r[k]).length : 0))
+      );
+      return { wch: Math.min(Math.max(10, maxLen + 2), 60) };
+    });
+    ws["!cols"] = colWidths;
+
+    window.XLSX.utils.book_append_sheet(wb, ws, "catalog-preview");
+
+    const filename =
+      "catalog-preview-" +
+      new Date().toISOString().slice(0, 19).replace(/[:T]/g, "") +
+      ".xlsx";
+
+    window.XLSX.writeFile(wb, filename);
   }
 
   // —— UI —— //
@@ -195,14 +220,16 @@ export default function App() {
           {busy ? "抓取中…" : "抓取目录"}
         </button>
         <button disabled title="预览会在下方展示，按钮仅为引导" style={btn}>预览（前 50 条）</button>
-        <button onClick={onExportCSV} disabled={!preview.length} style={btn}>导出 Excel</button>
+        <button onClick={onExportXLSX} disabled={!preview.length} style={btn}>
+          导出 Excel（.xlsx）
+        </button>
         <button disabled title="稍后接回 PDF 生成功能" style={btn}>生成 PDF</button>
       </div>
 
       {/* 预览卡片 */}
       <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 16, marginBottom: 24 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>抓取结果预览区</div>
-        {!preview.length ? <EmptyStripe /> : <PreviewTable list={preview} />}
+        {!preview.length ? <EmptyStripe /> : <PreviewTable list={preview} pickColumns={pickColumns} />}
       </div>
 
       <div style={{ color: "#888" }}>
@@ -226,13 +253,8 @@ function EmptyStripe() {
   );
 }
 
-function PreviewTable({ list }) {
-  const columns = (() => {
-    const candidates = ["title","name","sku","price","currency","url","img","preview","source"];
-    const keys = Object.keys(list[0] || {});
-    const picked = candidates.filter((k) => keys.indexOf(k) >= 0);
-    return (picked.length ? picked : keys.slice(0, 6)).slice(0, 6);
-  })();
+function PreviewTable({ list, pickColumns }) {
+  const columns = pickColumns(list).slice(0, 8);
 
   return (
     <div style={{ overflowX: "auto" }}>
