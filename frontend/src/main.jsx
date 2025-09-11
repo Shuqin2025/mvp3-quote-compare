@@ -1,5 +1,12 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import App from './App.jsx'
+
+console.log('[mvp3] main.jsx loaded')  // ← 烟雾测试
+
+createRoot(document.getElementById('root')).render(<App />)
+import React from 'react'
+import { createRoot } from 'react-dom/client'
 
 function App() {
   return (
