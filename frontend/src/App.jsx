@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 
 /** 读取 API 基座：优先 ?api= 其后才是 VITE_API_BASE/VITE_API_URL */
 function useApiBase() {
@@ -19,21 +19,15 @@ function useApiBase() {
 function pickItems(payload) {
   if (Array.isArray(payload)) return payload;
 
-  const tryGet = (obj) => (obj && Array.isArray(obj.items) ? obj.items : null);
-
   // 常见形态
   if (payload?.items) {
     if (Array.isArray(payload.items)) return payload.items;
-    if (payload.items && typeof payload.items === "object") {
-      // 有些后端返回 { items: { "0": {...}, "1": {...} } }
-      return Object.values(payload.items);
-    }
+    if (payload.items && typeof payload.items === "object") return Object.values(payload.items);
   }
   if (payload?.data?.items) {
     if (Array.isArray(payload.data.items)) return payload.data.items;
-    if (payload.data.items && typeof payload.data.items === "object") {
+    if (payload.data.items && typeof payload.data.items === "object")
       return Object.values(payload.data.items);
-    }
   }
 
   // 其它约定
@@ -42,12 +36,11 @@ function pickItems(payload) {
   if (payload?.data && Array.isArray(payload.data)) return payload.data;
   if (payload?.result?.items) {
     if (Array.isArray(payload.result.items)) return payload.result.items;
-    if (payload.result.items && typeof payload.result.items === "object") {
+    if (payload.result.items && typeof payload.result.items === "object")
       return Object.values(payload.result.items);
-    }
   }
 
-  // 最后再兜一层：payload 本身是对象集合
+  // 如果 payload 是对象集合
   if (payload && typeof payload === "object") {
     const vals = Object.values(payload);
     if (vals.length && vals.every((x) => typeof x === "object")) return vals;
@@ -92,8 +85,9 @@ function exportToXlsx(items, filename = "catalog-preview.xlsx") {
 
 export default function App() {
   const API_BASE = useApiBase();
+
   const [url, setUrl] = useState("");
-  const [limit, setLimit] = useState(50); // 50 / 100 / 200
+  const [limit, setLimit] = useState(100); // 预览上限：默认 100，亦可选 50 / 200
   const [loading, setLoading] = useState(false);
   const [info, setInfo] = useState({
     ok: true,
@@ -103,9 +97,15 @@ export default function App() {
 
   const disabled = !API_BASE || loading;
 
+  useEffect(() => {
+    // 方便排查：控制台打印一次 API_BASE
+    // （你页面右侧 Console 能看到：[mvp3] App loaded. API_BASE = ...）
+    console.log("[mvp3] App loaded. API_BASE =", API_BASE);
+  }, [API_BASE]);
+
   async function handleFetch() {
     if (!API_BASE) {
-      alert("没有 API 基座。请使用 ?api= 后端预览地址访问页面。");
+      alert("没有 API 基座。请使用 ?api=后端预览地址 访问页面。");
       return;
     }
     if (!url.trim()) {
@@ -118,18 +118,22 @@ export default function App() {
     setItems([]);
 
     try {
-      const reqUrl = `${API_BASE.replace(/\/+$/, "")}/v1/api/catalog/parse?url=${encodeURIComponent(
-        url.trim()
-      )}&limit=${encodeURIComponent(String(limit))}`;
+      // 为避免触发 CORS 预检，这里不再加自定义请求头，把语言通过查询参数传递
+      const lang =
+        (window.i18n && window.i18n.lang) ||
+        (navigator.language || "zh").slice(0, 2);
+
+      const reqUrl =
+        `${API_BASE.replace(/\/+$/, "")}` +
+        `/v1/api/catalog/parse?url=${encodeURIComponent(url.trim())}` +
+        `&limit=${encodeURIComponent(String(limit))}` +
+        `&lang=${encodeURIComponent(lang)}`;
 
       console.log("[mvp3] fetch ->", reqUrl);
 
       const res = await fetch(reqUrl, {
         method: "GET",
-        headers: {
-          Accept: "application/json",
-          "X-Lang": (window.i18n && window.i18n.lang) || "zh",
-        },
+        headers: { Accept: "application/json" }, // 仅使用“简单首部”，避免 204 预检留存
       });
 
       const text = await res.text();
@@ -141,6 +145,7 @@ export default function App() {
       try {
         json = JSON.parse(text);
       } catch {
+        // 不是 JSON，给出截断内容方便排查
         throw new Error(`后端未返回合法 JSON：\n${text.slice(0, 300)}...`);
       }
 
@@ -234,22 +239,14 @@ export default function App() {
                 <tr key={i}>
                   <td style={{ padding: "8px 6px", borderBottom: "1px solid #f5f5f5" }}>{it.sku}</td>
                   <td style={{ padding: "8px 6px", borderBottom: "1px solid #f5f5f5" }}>
-                    {it.img ? (
-                      <a href={it.img} target="_blank" rel="noreferrer">链接</a>
-                    ) : (
-                      "-"
-                    )}
+                    {it.img ? <a href={it.img} target="_blank" rel="noreferrer">链接</a> : "-"}
                   </td>
                   <td style={{ padding: "8px 6px", borderBottom: "1px solid #f5f5f5" }}>{it.title}</td>
                   <td style={{ padding: "8px 6px", borderBottom: "1px solid #f5f5f5" }}>
                     {it.price ? `${it.price}${it.currency ? ` ${it.currency}` : ""}` : "-"}
                   </td>
                   <td style={{ padding: "8px 6px", borderBottom: "1px solid #f5f5f5" }}>
-                    {it.url ? (
-                      <a href={it.url} target="_blank" rel="noreferrer">链接</a>
-                    ) : (
-                      "-"
-                    )}
+                    {it.url ? <a href={it.url} target="_blank" rel="noreferrer">链接</a> : "-"}
                   </td>
                 </tr>
               ))}
