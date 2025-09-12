@@ -1,33 +1,43 @@
 <!doctype html>
 <html lang="zh">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MVP3 Quote Compare</title>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MVP3 Quote Compare</title>
 
-    <link rel="stylesheet" href="/ui-enhance.css?v=36" />
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 1em; }
+    #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
+    #langSwitcher button { padding: 4px 8px; }
+    .container { max-width: 1200px; }
+    .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 10px; }
+    .alert-green { background:#e9f7ef; border:1px solid #bde5c8; }
+    .alert-amber { background:#fff8e1; border:1px solid #ffe082; }
+    .tool-row { display:flex; gap:10px; align-items:center; margin-bottom:12px; }
+    .url-input { flex:1; padding:8px; border:1px solid #ccc; border-radius:6px; }
+    .btn { padding:8px 12px; border:1px solid #888; background:#f6f6f6; border-radius:6px; cursor:pointer; }
+    .btn.primary { background:#2f6fed; color:#fff; border-color:#2f6fed; }
+    .placeholder { min-height: 360px; background: repeating-linear-gradient(45deg, #f9f9f9, #f9f9f9 10px, #f2f2f2 10px, #f2f2f2 20px); border:1px dashed #ddd; padding:10px; border-radius:8px; }
+    table.grid { width:100%; border-collapse: collapse; background:#fff; }
+    table.grid th, table.grid td { border:1px solid #eee; padding:6px 8px; }
+    table.grid th { background:#fafafa; }
+    .ft { color:#666; margin-top:12px; }
+  </style>
 
-    <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 12px; }
-      .app .lang button { margin-right: 8px; }
-      .tip.ok { background:#e6ffed; border:1px solid #b7eb8f; padding:10px; border-radius:6px; margin-bottom:12px; }
-      .tip.warn { background:#fffbe6; border:1px solid #ffe58f; padding:10px; border-radius:6px; margin-bottom:12px; }
-      .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-      .toolbar input { flex:1; padding:8px; border:1px solid #ddd; border-radius:6px; }
-      table { width:100%; border-collapse: collapse; }
-      th, td { border: 1px solid #eee; padding: 8px; text-align: left; vertical-align: middle; }
-      th { background: #fafafa; }
-    </style>
+  <!-- UI 增强（按钮、提示等） -->
+  <link rel="stylesheet" href="/ui-enhance.css?v=36" />
+</head>
+<body>
+  <div id="root"></div>
 
-    <!-- 语言脚本 & UI 增强（与之前一致） -->
-    <script src="/i18n.js?v=36"></script>
-    <script src="/ui-enhance.js?v=36"></script>
+  <!-- 语言/UI 辅助（与业务无关） -->
+  <script src="/i18n.js?v=36"></script>
+  <script src="/ui-enhance.js?v=36"></script>
 
-    <!-- ExcelJS：用于内嵌真实图片导出 .xlsx -->
-    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+  <!-- ExcelJS：用于把图片真正嵌入 xlsx -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+
+  <!-- Vite / React 入口 -->
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 </html>
