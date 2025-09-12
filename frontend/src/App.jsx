@@ -1,183 +1,150 @@
-// frontend/src/App.jsx
-import { useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
+// frontend/src/App.jsx —— 直接整文件替换
+import React, { useMemo, useRef, useState } from 'react';
 
-// 从预览地址 ?api=... 读取后端基址
-function getApiBase() {
-  const u = new URL(window.location.href);
-  const v = u.searchParams.get('api');
-  return v ? v.replace(/\/+$/, '') : '';
+/** 读取 ?api= 覆盖后端地址 */
+function useApiBase() {
+  return useMemo(() => {
+    try {
+      const u = new URL(window.location.href);
+      const override = u.searchParams.get('api');
+      const base = (override || '').trim() || 'http://localhost:8080'; // fallback 本地
+      console.info('[mvp3] App loaded. API_BASE =', base);
+      return base.replace(/\/$/, '');
+    } catch {
+      return 'http://localhost:8080';
+    }
+  }, []);
 }
 
-const API_BASE = getApiBase();
-
 export default function App() {
-  const [url, setUrl] = useState('');
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const API_BASE = useApiBase();
+  const urlInput = useRef(null);
+
+  const [list, setList] = useState([]);
+  const [stat, setStat] = useState({ ok: false, count: 0 });
   const [limit, setLimit] = useState(50);
+  const [loading, setLoading] = useState(false);
 
-  // 预览里用图片代理，避免该站 CORS/防盗链
-  const proxiedImg = (raw) =>
-    `${API_BASE}/v1/api/img?src=${encodeURIComponent(raw)}`;
+  async function onFetch() {
+    const pageUrl = (urlInput.current?.value || '').trim();
+    if (!pageUrl) return alert('请输入目录页 URL');
 
-  async function fetchList() {
-    if (!url) return;
     setLoading(true);
+    setList([]);
+    setStat({ ok: false, count: 0 });
+
     try {
-      const qs = new URLSearchParams({ url, limit: String(limit) }).toString();
-      const resp = await fetch(`${API_BASE}/v1/api/catalog/parse?${qs}`, {
-        headers: { 'x-lang': localStorage.getItem('mvp3.lang') || 'zh' },
-      });
+      const qs = new URLSearchParams({ url: pageUrl, limit: String(limit) });
+      const resp = await fetch(`${API_BASE}/v1/api/catalog/parse?${qs.toString()}`);
       const data = await resp.json();
 
-      if (!Array.isArray(data?.items)) {
-        throw new Error('响应格式不正确，items 不是数组。');
+      const items = Array.isArray(data.items) ? data.items : [];
+      setList(items);
+      setStat({ ok: true, count: data.count ?? items.length });
+
+      if (!Array.isArray(data.items)) {
+        alert('抓取失败：响应格式不正确，items 不是数组。');
       }
-      setRows(data.items);
-      ui.toast(`抓取成功：共 ${data.items.length} 条`);
     } catch (e) {
       console.error('[mvp3] fetch error:', e);
-      ui.alert(`抓取失败：${e.message || e}`);
+      alert('抓取失败：网络或服务异常。');
     } finally {
       setLoading(false);
     }
   }
 
-  function exportXlsx() {
-    if (!rows.length) {
-      ui.alert('没有可导出的数据');
-      return;
-    }
-    const wsData = [
+  /** 导出 .xlsx（不含内嵌图片，后续可再加内嵌） */
+  async function onExportXlsx() {
+    if (!list.length) return alert('没有可导出的数据');
+    // 动态引入 SheetJS 以减小首屏
+    const XLSX = await import(/* webpackIgnore: true */ 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js')
+      .then(m => (m.default || window.XLSX));
+
+    const rows = [
       ['Item No.', 'Picture', 'Description', 'MOQ', 'Unit Price', 'Link'],
-      ...rows.map((r) => [
-        r.sku || '',
-        // 先导出为“图片链接”；Excel 内嵌真实图片需要改用 exceljs，见文末“下一步”
-        r.img ? `=HYPERLINK("${r.img}","Bild")` : '',
-        r.title || '',
-        r.moq || '',
-        r.price ? `${r.price}${r.currency || ''}` : '',
-        r.url ? `=HYPERLINK("${r.url}","链接")` : '',
-      ]),
+      ...list.map(x => [
+        x.sku || '',
+        x.img || '',
+        x.title || '',
+        x.moq || '',
+        x.price ? `${x.price}${x.currency || ''}` : '',
+        x.url || ''
+      ])
     ];
+
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'catalog');
-    const fname = `catalog-preview-${new Date()
-      .toISOString()
-      .slice(0, 19)
-      .replace(/[-:T]/g, '')}.xlsx`;
-    XLSX.writeFile(wb, fname);
+    XLSX.writeFile(wb, `catalog-preview-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'')}.xlsx`);
   }
 
-  useEffect(() => {
-    console.log('[mvp3] App loaded. API_BASE =', API_BASE || '(empty)');
-  }, []);
-
   return (
-    <div>
-      <h2>MVP3 — App</h2>
+    <div style={{ padding: 16, fontFamily: 'system-ui, sans-serif' }}>
+      <h1>MVP3 — App</h1>
 
-      <div className="tip ok">
+      <div style={{ background: '#e8f5e9', padding: 12, borderRadius: 6, marginBottom: 12 }}>
         这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。
       </div>
 
-      <div className="tip warn">
-        抓取成功：共 {rows.length} 条（预览前 {limit} 条）
+      <div style={{ background: '#fff3e0', padding: 12, borderRadius: 6, marginBottom: 12 }}>
+        抓取成功：共 {stat.count} 条（预览前 {limit} 条）
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <input
-          style={{ flex: 1 }}
+          ref={urlInput}
+          style={{ flex: 1, padding: 8 }}
           placeholder="粘贴要抓取的目录页 URL（例如某电商分类页）"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
+          defaultValue=""
         />
-        <button className="primary" onClick={fetchList} disabled={loading}>
+        <button onClick={onFetch} disabled={loading} style={{ padding: '8px 12px' }}>
           {loading ? '抓取中…' : '抓取目录'}
         </button>
-
-        <select
-          value={limit}
-          onChange={(e) => setLimit(Number(e.target.value))}
-        >
-          {[50, 100, 200, 300, 500].map((n) => (
-            <option key={n} value={n}>
-              预览（前 {n} 条）
-            </option>
-          ))}
+        <select value={limit} onChange={e => setLimit(parseInt(e.target.value, 10) || 50)}>
+          {[50, 100].map(n => <option key={n} value={n}>预览（前 {n} 条）</option>)}
         </select>
-
-        <button onClick={exportXlsx}>导出 Excel（.xlsx）</button>
+        <button onClick={onExportXlsx} disabled={!list.length} style={{ padding: '8px 12px' }}>
+          导出 Excel（.xlsx）
+        </button>
       </div>
 
-      <div className="preview">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th style={{ width: 150 }}>Item No.</th>
-              <th style={{ width: 120 }}>Picture</th>
-              <th>Description</th>
-              <th style={{ width: 90 }}>MOQ</th>
-              <th style={{ width: 120 }}>Unit Price</th>
-              <th style={{ width: 120 }}>Link</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td>{r.sku}</td>
-                <td>
-                  {r.img ? (
-                    <img
-                      src={proxiedImg(r.img)}
-                      alt={r.sku}
-                      style={{
-                        width: 80,
-                        height: 80,
-                        objectFit: 'contain',
-                        background: '#fff',
-                        border: '1px solid #eee',
-                      }}
-                      loading="lazy"
-                    />
-                  ) : (
-                    ''
-                  )}
-                </td>
-                <td>{r.title}</td>
-                <td>{r.moq || '—'}</td>
-                <td>
-                  {r.price ? (
-                    <>
-                      {r.price}
-                      {r.currency || ''}
-                    </>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td>
-                  {r.url ? (
-                    <a href={r.url} target="_blank" rel="noreferrer">
-                      链接
-                    </a>
-                  ) : (
-                    ''
-                  )}
-                </td>
+      <div style={{
+        minHeight: 260, background:
+          'repeating-linear-gradient(45deg,#fafafa,#fafafa 10px,#f3f3f3 10px,#f3f3f3 20px)',
+        borderRadius: 8, padding: 12
+      }}>
+        {!list.length ? (
+          <em>（占位区域：后续将展示抓取返回的 JSON 简要预览，或转换成表格的展示。）</em>
+        ) : (
+          <table width="100%" cellPadding="6" style={{ borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f6f6f6' }}>
+                <th align="left">Item No.</th>
+                <th align="left">Picture</th>
+                <th align="left">Description</th>
+                <th align="left">MOQ</th>
+                <th align="left">Unit Price</th>
+                <th align="left">Link</th>
               </tr>
-            ))}
-            {!rows.length && (
-              <tr>
-                <td colSpan={6} style={{ color: '#999' }}>
-                  （占位区域：后续将展示抓取返回的 JSON 简要预览，或转换成表格的展示。）
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {list.map((x, i) => (
+                <tr key={i} style={{ borderTop: '1px solid #eee' }}>
+                  <td>{x.sku || ''}</td>
+                  <td>{x.img ? <img alt="" src={x.img} style={{ width: 80, height: 80, objectFit: 'contain' }} /> : ''}</td>
+                  <td>{x.title || ''}</td>
+                  <td>{x.moq || ''}</td>
+                  <td>{x.price ? `${x.price}${x.currency || ''}` : ''}</td>
+                  <td>{x.url ? <a href={x.url} target="_blank" rel="noreferrer">链接</a> : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ marginTop: 12, color: '#888' }}>
+        © MVP3 — 页面骨架（占位版）。确认部署稳定后，将逐步接回业务逻辑。
       </div>
     </div>
   );
