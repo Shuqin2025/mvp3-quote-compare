@@ -1,37 +1,26 @@
 import React, { useMemo, useRef, useState } from 'react';
 
-/** 从 ?api=... 里读后端基址；没有就兜底一个空串（防止构建时报错） */
+/** 读取后端 API 基址（来自 ?api=...）；去掉尾部 / */
 const API_BASE =
   new URLSearchParams(location.search).get('api')?.replace(/\/+$/, '') || '';
 
-/** 提取“真实货号”：
- *  - 从 URL 尾部 slug 里找出以 5 位数字开头的一段
- *  - 把 -1-5- / -0-5- / -2-0- / -3-0- / -5-0- 等转成带小数点
- *  - 统一把 mhq / slim 等后缀大写
- * 例：
- *  https://.../home-cinema-35mm-...-30805-1-5-mhq-slim.html
- *  => 30805-1.5-MHQ-SLIM
- */
+/** 提取真实货号：从 URL 最后段匹配如 30805-1-5-mhq-slim */
 function extractItemNo(url = '') {
   try {
     const slug = url.split('/').pop()?.replace(/\.html?$/i, '') || '';
     const m = slug.match(/(\d{5}[-\w]*)$/i);
     if (!m) return '';
     let code = m[1];
-
-    // 把 -1-5- / -0-5- / -2-0- / -3-0- / -5-0- 等替换成 -1.5- / -0.5- / -2.0- / ...
+    // 把 -1-5- / -0-5- / -2-0- / -3-0- / -5-0- 转成 -1.5- / -0.5- / -2.0- / ...
     code = code.replace(/-(\d)-(\d)(?=-|$)/g, '-$1.$2');
-
-    // 统一大写常见后缀
+    // 常见后缀大写
     code = code.replace(/mhq/gi, 'MHQ').replace(/slim/gi, 'SLIM');
-
     return code;
   } catch {
     return '';
   }
 }
 
-/** 价格展示：null/空 -> “—”；有货币则拼接 */
 function fmtPrice(price, currency) {
   if (price == null || price === '') return '—';
   return `${price}${currency || ''}`;
@@ -39,16 +28,15 @@ function fmtPrice(price, currency) {
 
 export default function App() {
   const [lang, setLang] = useState('zh');
-  const [limit, setLimit] = useState(50); // 这里可设置 50 / 100 / 200 …
+  const [limit, setLimit] = useState(50);
   const [inputUrl, setInputUrl] = useState('');
   const [items, setItems] = useState([]);
-  const [hint, setHint] = useState('这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。');
+  const [hint] = useState('这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。');
   const busyRef = useRef(false);
 
   const countOk = items?.length || 0;
   const langLabel = useMemo(
-    () =>
-      ({ zh: 'CN 中文', de: 'DE Deutsch', en: 'GB English' }[lang] || 'CN 中文'),
+    () => ({ zh: 'CN 中文', de: 'DE Deutsch', en: 'GB English' }[lang] || 'CN 中文'),
     [lang]
   );
 
@@ -69,35 +57,23 @@ export default function App() {
       const url = `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(
         inputUrl.trim()
       )}&limit=${limit}`;
-
       console.log('[mvp3] fetch ->', url);
-      const res = await fetch(url, {
-        headers: { 'x-lang': lang },
-      });
 
-      // preflight 204 时，真正的 GET 会紧跟着成功；这里只处理最终 JSON
+      const res = await fetch(url, { headers: { 'x-lang': lang } });
       const data = await res.json().catch(() => ({}));
 
-      if (!data || data.ok !== true) {
-        throw new Error(data?.error || '接口返回异常');
-      }
-      if (!Array.isArray(data.products)) {
-        throw new Error('响应格式不正确，items 不是数组。');
-      }
+      if (!data || data.ok !== true) throw new Error(data?.error || '接口返回异常');
+      if (!Array.isArray(data.products)) throw new Error('响应格式不正确，items 不是数组。');
 
-      // 规范化 & 增补字段（itemNo）
-      const normalized = data.products.map((it, idx) => {
-        const itemNo = extractItemNo(it.url);
-        return {
-          idx: idx + 1,
-          itemNo,
-          title: it.title ?? '',
-          url: it.url ?? '',
-          price: it.price ?? null,
-          currency: it.currency ?? '',
-          img: it.img ?? '',
-        };
-      });
+      const normalized = data.products.map((it, idx) => ({
+        idx: idx + 1,
+        itemNo: extractItemNo(it.url),
+        title: it.title ?? '',
+        url: it.url ?? '',
+        price: it.price ?? null,
+        currency: it.currency ?? '',
+        img: it.img ?? '',
+      }));
 
       setItems(normalized);
     } catch (err) {
@@ -108,7 +84,7 @@ export default function App() {
     }
   }
 
-  /** 导出 .xlsx（使用全局 XLSX） */
+  /** 导出 .xlsx：Picture 列使用 IMAGE() 公式嵌入图片 */
   function onExportXlsx() {
     if (!window.XLSX) {
       alert('XLSX 未加载，请检查 index.html 中的 <script src="xlsx.full.min.js">。');
@@ -119,45 +95,55 @@ export default function App() {
       return;
     }
 
-    // 表头：Item No. / Picture / Description / MOQ / Unit Price / Link
+    // AOA 先铺数据（Picture 用占位，稍后再写入公式）
     const rows = [
       ['Item No.', 'Picture', 'Description', 'MOQ', 'Unit Price', 'Link'],
       ...items.map((it) => [
-        it.itemNo || '',                         // A: 真实货号
-        it.img || '',                             // B: 图片 URL（Excel 中以超链接/文本展示）
-        it.title || '',                           // C: 描述
-        '',                                       // D: MOQ（暂无，留空）
-        fmtPrice(it.price, it.currency),          // E: 单价
-        it.url || '',                             // F: 详情链接
+        it.itemNo || '',
+        it.img || '',                    // 先放 URL 作为备用值
+        it.title || '',
+        '',
+        fmtPrice(it.price, it.currency),
+        it.url || '',
       ]),
     ];
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(rows);
 
-    // 自动列宽（简化）
-    const colMax = rows.reduce(
-      (acc, r) => Math.max(acc, r.length),
-      0
-    );
-    ws['!cols'] = new Array(colMax).fill(0).map((_, i) => ({
-      wch: [14, 24, 60, 8, 14, 80][i] || 16, // 每列给个合适宽度
-    }));
+    // 给 Picture 列（B列）写入 IMAGE() 公式（自第2行开始）
+    items.forEach((it, i) => {
+      const r = 2 + i; // header 在第1行
+      const addr = `B${r}`;
+      if (it.img) {
+        // 设置备用显示值（老版本 Excel 不支持时至少能看到 URL）
+        ws[addr] = { t: 's', v: it.img, f: `IMAGE("${it.img}")` };
+      }
+    });
+
+    // 设置列宽
+    ws['!cols'] = [
+      { wch: 20 }, // Item No.
+      { wch: 24 }, // Picture
+      { wch: 60 }, // Description
+      { wch: 8  }, // MOQ
+      { wch: 14 }, // Unit Price
+      { wch: 90 }, // Link
+    ];
 
     XLSX.utils.book_append_sheet(wb, ws, 'catalog-preview');
+
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const name = `catalog-preview-${now.getFullYear()}-${pad(
-      now.getMonth() + 1
-    )}-${pad(now.getDate())}${pad(now.getHours())}${pad(
-      now.getMinutes()
-    )}${pad(now.getSeconds())}.xlsx`;
+    const name = `catalog-preview-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+      now.getDate()
+    )}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.xlsx`;
     XLSX.writeFile(wb, name);
   }
 
   return (
     <div style={{ padding: 16 }}>
-      {/* 语言切换（仅演示，不改变页面文案） */}
+      {/* 语言切换（只保留这一组） */}
       <div id="langSwitcher" style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
         <button onClick={() => setLang('zh')}>CN 中文</button>
         <button onClick={() => setLang('de')}>DE Deutsch</button>
@@ -168,7 +154,7 @@ export default function App() {
 
       {/* 顶部提示 */}
       <div className="ui-banner ok" style={{ marginBottom: 12 }}>
-        {hint}
+        这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。
       </div>
 
       {/* 统计条 */}
@@ -187,17 +173,12 @@ export default function App() {
         <button className="ui-primary" onClick={onFetch}>
           {busyRef.current ? '抓取中…' : '抓取目录'}
         </button>
-        <select
-          value={limit}
-          onChange={(e) => setLimit(parseInt(e.target.value, 10))}
-        >
+        <select value={limit} onChange={(e) => setLimit(parseInt(e.target.value, 10))}>
           <option value={50}>预览（前 50 条）</option>
           <option value={100}>预览（前 100 条）</option>
           <option value={200}>预览（前 200 条）</option>
         </select>
-        <button className="ui-secondary" onClick={onExportXlsx}>
-          导出 Excel（.xlsx）
-        </button>
+        <button className="ui-secondary" onClick={onExportXlsx}>导出 Excel（.xlsx）</button>
       </div>
 
       {/* 预览区 */}
@@ -206,7 +187,6 @@ export default function App() {
           border: '1px dashed #ddd',
           borderRadius: 6,
           minHeight: 280,
-          padding: 0,
           overflow: 'auto',
         }}
       >
@@ -246,9 +226,7 @@ export default function App() {
                   <td style={{ textAlign: 'right' }}>{fmtPrice(it.price, it.currency)}</td>
                   <td style={{ textAlign: 'center' }}>
                     {it.url ? (
-                      <a href={it.url} target="_blank" rel="noreferrer">
-                        链接
-                      </a>
+                      <a href={it.url} target="_blank" rel="noreferrer">链接</a>
                     ) : (
                       '—'
                     )}
