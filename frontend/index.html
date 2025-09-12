@@ -1,77 +1,34 @@
 <!doctype html>
 <html lang="zh">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MVP3 — App</title>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MVP3 — App</title>
+  <link rel="stylesheet" href="/ui-enhance.css?v=36" />
+  <style>
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin: 1rem; }
+    #langSwitcher { display:flex; gap:.5rem; margin-bottom:.75rem; }
+    #root { margin-top:.5rem; }
+    .note { color:#666; font-size:12px; }
+  </style>
 
-    <style>
-      body { font-family: sans-serif; margin: 1em; }
-      #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; flex-wrap: wrap; }
-      #langSwitcher button { padding: 4px 8px; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { border: 1px solid #ddd; padding: 8px; }
-      th { background: #f8f8f8; }
-      .hint { background:#e9f7ef; padding:.75em 1em; border-radius:6px; color:#2f6f3e; }
-      .bar  { background:#fff7e6; padding:.6em 1em; border-radius:6px; color:#8a5b00; margin:.75em 0; }
-      .btn { padding:6px 12px; border-radius:6px; border:1px solid #ccc; cursor:pointer; }
-      .btn-primary { background:#1677ff; color:#fff; border-color:#1677ff; }
-      .link { color:#1677ff; text-decoration:none; }
-      .muted { color:#999; }
-      .wrap { max-width: 1200px; margin: 0 auto; }
-    </style>
+  <!-- i18n / 辅助UI -->
+  <script src="/i18n.js?v=36"></script>
+  <script src="/ui-enhance.js?v=36"></script>
 
-    <link rel="stylesheet" href="/ui-enhance.css?v=36" />
-  </head>
-  <body>
-    <div class="wrap">
-      <h1>MVP3 — App</h1>
+  <!-- ExcelJS（用于内嵌图片） -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+</head>
+<body>
+  <div id="langSwitcher">
+    <button onclick="i18n.setLang('zh')">CN 中文</button>
+    <button onclick="i18n.setLang('de')">DE Deutsch</button>
+    <button onclick="i18n.setLang('en')">GB English</button>
+  </div>
 
-      <div class="hint">这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。</div>
-      <div class="bar" id="stat">抓取成功：共 0 条（预览前 50 条）</div>
+  <div id="root"></div>
 
-      <div id="langSwitcher">
-        <button onclick="i18n.setLang('zh')">CN 中文</button>
-        <button onclick="i18n.setLang('de')">DE Deutsch</button>
-        <button onclick="i18n.setLang('en')">GB English</button>
-      </div>
-
-      <div>
-        <input id="url" style="width:60%" placeholder="粘贴要抓取的目录页 URL（例如某电商分类页）" />
-        <button id="btnFetch" class="btn btn-primary">抓取目录</button>
-        <select id="limit">
-          <option value="50">预览（前 50 条）</option>
-          <option value="100">预览（前 100 条）</option>
-        </select>
-        <button id="btnXlsx" class="btn">导出 Excel（.xlsx）</button>
-      </div>
-
-      <div style="margin-top:12px">
-        <table id="tbl">
-          <thead>
-            <tr>
-              <th style="width:140px">Item No.</th>
-              <th style="width:120px">Picture</th>
-              <th>Description</th>
-              <th style="width:90px">MOQ</th>
-              <th style="width:120px">Unit Price</th>
-              <th style="width:80px">Link</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-
-      <p class="muted">© MVP3 — 页面骨架（占位版）。确认部署稳定后，将逐步接回业务逻辑。</p>
-    </div>
-
-    <script src="/i18n.js?v=36"></script>
-    <script src="/ui-enhance.js?v=36"></script>
-
-    <!-- SheetJS（导出） -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
-    <!-- Vite 入口 -->
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+  <!-- 入口 -->
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 </html>
