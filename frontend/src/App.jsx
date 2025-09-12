@@ -1,275 +1,256 @@
 import React, { useMemo, useRef, useState } from 'react';
 
-/**
- * MVP3 — App.jsx
- * 适配后端返回 { ok, source, count, products: [...] }
- * - 解析 ?api= 后端地址
- * - 抓取目录，展示预览
- * - 导出为 .xlsx（列顺序：Item No. / Picture / Description / MOQ / Unit Price / Link）
- */
+/** 从 ?api=... 里读后端基址；没有就兜底一个空串（防止构建时报错） */
+const API_BASE =
+  new URLSearchParams(location.search).get('api')?.replace(/\/+$/, '') || '';
 
-const getApiBase = () => {
+/** 提取“真实货号”：
+ *  - 从 URL 尾部 slug 里找出以 5 位数字开头的一段
+ *  - 把 -1-5- / -0-5- / -2-0- / -3-0- / -5-0- 等转成带小数点
+ *  - 统一把 mhq / slim 等后缀大写
+ * 例：
+ *  https://.../home-cinema-35mm-...-30805-1-5-mhq-slim.html
+ *  => 30805-1.5-MHQ-SLIM
+ */
+function extractItemNo(url = '') {
   try {
-    const sp = new URLSearchParams(window.location.search);
-    const api = (sp.get('api') || '').trim();
-    return api.replace(/\/+$/, ''); // 去尾部 /
+    const slug = url.split('/').pop()?.replace(/\.html?$/i, '') || '';
+    const m = slug.match(/(\d{5}[-\w]*)$/i);
+    if (!m) return '';
+    let code = m[1];
+
+    // 把 -1-5- / -0-5- / -2-0- / -3-0- / -5-0- 等替换成 -1.5- / -0.5- / -2.0- / ...
+    code = code.replace(/-(\d)-(\d)(?=-|$)/g, '-$1.$2');
+
+    // 统一大写常见后缀
+    code = code.replace(/mhq/gi, 'MHQ').replace(/slim/gi, 'SLIM');
+
+    return code;
   } catch {
     return '';
   }
-};
+}
 
-const LIMIT_OPTIONS = [50, 100, 200];
+/** 价格展示：null/空 -> “—”；有货币则拼接 */
+function fmtPrice(price, currency) {
+  if (price == null || price === '') return '—';
+  return `${price}${currency || ''}`;
+}
 
 export default function App() {
-  const API_BASE = useMemo(getApiBase, []);
-  const inputRef = useRef(null);
+  const [lang, setLang] = useState('zh');
+  const [limit, setLimit] = useState(50); // 这里可设置 50 / 100 / 200 …
+  const [inputUrl, setInputUrl] = useState('');
+  const [items, setItems] = useState([]);
+  const [hint, setHint] = useState('这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。');
+  const busyRef = useRef(false);
 
-  const [limit, setLimit] = useState(LIMIT_OPTIONS[0]);
-  const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState([]); // 预览行
-  const [meta, setMeta] = useState({ ok: false, source: '', count: 0 });
+  const countOk = items?.length || 0;
+  const langLabel = useMemo(
+    () =>
+      ({ zh: 'CN 中文', de: 'DE Deutsch', en: 'GB English' }[lang] || 'CN 中文'),
+    [lang]
+  );
 
-  // 调试信息：在 Console 打印确认
-  if (typeof window !== 'undefined') {
-    // eslint-disable-next-line no-console
-    console.log('[mvp3] App loaded. API_BASE =', API_BASE || '(empty)');
-  }
-
-  const fetchCatalog = async () => {
-    const url = (inputRef.current?.value || '').trim();
-    if (!url) {
-      alert('请先输入要抓取的目录页 URL。');
-      return;
-    }
+  async function onFetch() {
+    if (busyRef.current) return;
     if (!API_BASE) {
-      alert('未检测到 API 基地址（请在预览地址后带上 ?api=后端地址）。');
+      alert('未检测到后端 API 基址，请以 ?api=... 的方式打开页面。');
+      return;
+    }
+    if (!inputUrl.trim()) {
+      alert('请先粘贴要抓取的目录页 URL。');
       return;
     }
 
-    const endpoint = `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(
-      url
-    )}&limit=${limit}`;
-
-    setLoading(true);
-    setRows([]);
-    setMeta({ ok: false, source: '', count: 0 });
-
+    busyRef.current = true;
+    setItems([]);
     try {
-      // 带上语言头（后端允许 x-lang，可选）
-      const lang = (window.i18n && window.i18n.lang) || 'zh';
-      // eslint-disable-next-line no-console
-      console.log('[mvp3] fetch ->', endpoint);
-      const res = await fetch(endpoint, { headers: { 'x-lang': lang } });
+      const url = `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(
+        inputUrl.trim()
+      )}&limit=${limit}`;
 
-      // 有些场景 200 才有 body；204 是预检或无内容
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const data = await res.json();
-
-      if (!data || !Array.isArray(data.products)) {
-        throw new Error('响应格式不正确，products 不是数组。');
-      }
-
-      setMeta({
-        ok: !!data.ok,
-        source: data.source || url,
-        count: Number(data.count || data.products.length || 0),
+      console.log('[mvp3] fetch ->', url);
+      const res = await fetch(url, {
+        headers: { 'x-lang': lang },
       });
 
-      // 统一成我们要的导出结构字段
-      const normalized = data.products.map((p, idx) => ({
-        index: idx + 1,
-        // Excel: Item No.（用 sku；为空就用 index）
-        itemNo: p.sku && String(p.sku).trim() ? String(p.sku).trim() : String(idx + 1),
-        picture: p.img || '',
-        description: p.title || '',
-        moq: '', // 暂无，留空
-        unitPrice: p.price || '', // 原样放 price 字段（字符串）
-        link: p.url || '',
-        // 额外保留原始字段以便预览时使用（不导出）
-        _raw: p,
-      }));
+      // preflight 204 时，真正的 GET 会紧跟着成功；这里只处理最终 JSON
+      const data = await res.json().catch(() => ({}));
 
-      setRows(normalized);
+      if (!data || data.ok !== true) {
+        throw new Error(data?.error || '接口返回异常');
+      }
+      if (!Array.isArray(data.products)) {
+        throw new Error('响应格式不正确，items 不是数组。');
+      }
+
+      // 规范化 & 增补字段（itemNo）
+      const normalized = data.products.map((it, idx) => {
+        const itemNo = extractItemNo(it.url);
+        return {
+          idx: idx + 1,
+          itemNo,
+          title: it.title ?? '',
+          url: it.url ?? '',
+          price: it.price ?? null,
+          currency: it.currency ?? '',
+          img: it.img ?? '',
+        };
+      });
+
+      setItems(normalized);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('[mvp3] fetch error:', err);
-      alert(`抓取失败：${err?.message || err}`);
+      alert('抓取失败：' + (err?.message || String(err)));
     } finally {
-      setLoading(false);
+      busyRef.current = false;
     }
-  };
+  }
 
-  const exportXLSX = () => {
-    if (!rows.length) {
-      alert('没有可导出的数据，请先抓取。');
+  /** 导出 .xlsx（使用全局 XLSX） */
+  function onExportXlsx() {
+    if (!window.XLSX) {
+      alert('XLSX 未加载，请检查 index.html 中的 <script src="xlsx.full.min.js">。');
       return;
     }
-    // 构建导出数组（按固定列顺序）
-    const exportRows = rows.map((r) => ({
-      'Item No.': r.itemNo,
-      Picture: r.picture,
-      Description: r.description,
-      MOQ: r.moq,
-      'Unit Price': r.unitPrice,
-      Link: r.link,
+    if (!items.length) {
+      alert('暂无数据可导出，请先抓取。');
+      return;
+    }
+
+    // 表头：Item No. / Picture / Description / MOQ / Unit Price / Link
+    const rows = [
+      ['Item No.', 'Picture', 'Description', 'MOQ', 'Unit Price', 'Link'],
+      ...items.map((it) => [
+        it.itemNo || '',                         // A: 真实货号
+        it.img || '',                             // B: 图片 URL（Excel 中以超链接/文本展示）
+        it.title || '',                           // C: 描述
+        '',                                       // D: MOQ（暂无，留空）
+        fmtPrice(it.price, it.currency),          // E: 单价
+        it.url || '',                             // F: 详情链接
+      ]),
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // 自动列宽（简化）
+    const colMax = rows.reduce(
+      (acc, r) => Math.max(acc, r.length),
+      0
+    );
+    ws['!cols'] = new Array(colMax).fill(0).map((_, i) => ({
+      wch: [14, 24, 60, 8, 14, 80][i] || 16, // 每列给个合适宽度
     }));
 
-    // 依赖 index.html 中已引入的 SheetJS（xlsx.full.min.js）
-    // @ts-ignore
-    const XLSX = window.XLSX;
-    if (!XLSX) {
-      alert('未检测到 XLSX 依赖，请检查 index.html 是否已引入。');
-      return;
-    }
-
-    const ws = XLSX.utils.json_to_sheet(exportRows, { skipHeader: false });
-    const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'catalog-preview');
-
-    const ts = new Date();
+    const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const name = `catalog-preview-${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(
-      ts.getDate()
-    )}${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.xlsx`;
-
+    const name = `catalog-preview-${now.getFullYear()}-${pad(
+      now.getMonth() + 1
+    )}-${pad(now.getDate())}${pad(now.getHours())}${pad(
+      now.getMinutes()
+    )}${pad(now.getSeconds())}.xlsx`;
     XLSX.writeFile(wb, name);
-  };
+  }
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', paddingBottom: 48 }}>
+    <div style={{ padding: 16 }}>
+      {/* 语言切换（仅演示，不改变页面文案） */}
+      <div id="langSwitcher" style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
+        <button onClick={() => setLang('zh')}>CN 中文</button>
+        <button onClick={() => setLang('de')}>DE Deutsch</button>
+        <button onClick={() => setLang('en')}>GB English</button>
+      </div>
+
       <h1>MVP3 — App</h1>
 
-      {/* 顶部绿色提醒 */}
-      <div
-        style={{
-          background: '#e8f7e8',
-          border: '1px solid #bfe5bf',
-          padding: '10px 12px',
-          borderRadius: 6,
-          marginBottom: 10,
-        }}
-      >
-        这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。
+      {/* 顶部提示 */}
+      <div className="ui-banner ok" style={{ marginBottom: 12 }}>
+        {hint}
       </div>
 
-      {/* 统计提示 */}
-      <div
-        style={{
-          background: '#fff5e6',
-          border: '1px solid #f5d7a3',
-          padding: '10px 12px',
-          borderRadius: 6,
-          marginBottom: 12,
-          color: '#8a6d3b',
-        }}
-      >
-        抓取成功：共 {rows.length} 条（预览前 {limit} 条）
+      {/* 统计条 */}
+      <div className="ui-banner info" style={{ marginBottom: 12 }}>
+        抓取成功：共 {countOk} 条（预览前 {limit} 条）
       </div>
 
-      {/* 输入行 */}
+      {/* 输入区 */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
         <input
-          ref={inputRef}
-          type="text"
+          style={{ flex: 1 }}
           placeholder="粘贴要抓取的目录页 URL（例如某电商分类页）"
-          style={{ flex: 1, padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6 }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') fetchCatalog();
-          }}
+          value={inputUrl}
+          onChange={(e) => setInputUrl(e.target.value)}
         />
-        <button
-          className="btn btn-primary"
-          disabled={loading}
-          onClick={fetchCatalog}
-          style={{ padding: '8px 14px' }}
-        >
-          {loading ? '抓取中…' : '抓取目录'}
+        <button className="ui-primary" onClick={onFetch}>
+          {busyRef.current ? '抓取中…' : '抓取目录'}
         </button>
-
         <select
           value={limit}
-          onChange={(e) => setLimit(Number(e.target.value))}
-          style={{ padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6 }}
+          onChange={(e) => setLimit(parseInt(e.target.value, 10))}
         >
-          {LIMIT_OPTIONS.map((n) => (
-            <option key={n} value={n}>
-              预览（前 {n} 条）
-            </option>
-          ))}
+          <option value={50}>预览（前 50 条）</option>
+          <option value={100}>预览（前 100 条）</option>
+          <option value={200}>预览（前 200 条）</option>
         </select>
-
-        <button className="btn" onClick={exportXLSX} style={{ padding: '8px 14px' }}>
+        <button className="ui-secondary" onClick={onExportXlsx}>
           导出 Excel（.xlsx）
         </button>
       </div>
 
-      {/* 预览卡片 */}
+      {/* 预览区 */}
       <div
         style={{
-          minHeight: 260,
-          border: '1px dashed #dcdcdc',
-          borderRadius: 8,
-          background:
-            rows.length === 0
-              ? 'repeating-linear-gradient(45deg, #fafafa, #fafafa 10px, #f5f5f5 10px, #f5f5f5 20px)'
-              : '#fff',
-          padding: rows.length ? 12 : 0,
+          border: '1px dashed #ddd',
+          borderRadius: 6,
+          minHeight: 280,
+          padding: 0,
+          overflow: 'auto',
         }}
       >
-        {rows.length === 0 ? (
-          <div style={{ color: '#9aa0a6', padding: '48px 16px' }}>
+        {items.length === 0 ? (
+          <div style={{ padding: 16, color: '#888' }}>
             （占位区域：后续将展示抓取返回的 JSON 简要预览，或转换成表格的展示。）
           </div>
         ) : (
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: 14,
-            }}
-          >
+          <table className="ui-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ background: '#fafafa' }}>
-                <th style={th}>#</th>
-                <th style={th}>Item No.</th>
-                <th style={th}>Picture</th>
-                <th style={th}>Description</th>
-                <th style={th}>Unit Price</th>
-                <th style={th}>Link</th>
+              <tr>
+                <th style={{ width: 64, textAlign: 'center' }}>#</th>
+                <th style={{ width: 160 }}>Item No.</th>
+                <th style={{ width: 120 }}>Picture</th>
+                <th>Description</th>
+                <th style={{ width: 120, textAlign: 'right' }}>Unit Price</th>
+                <th style={{ width: 80, textAlign: 'center' }}>Link</th>
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, limit).map((r) => (
-                <tr key={r.index}>
-                  <td style={td}>{r.index}</td>
-                  <td style={td}>{r.itemNo}</td>
-                  <td style={td}>
-                    {r.picture ? (
-                      <a href={r.picture} target="_blank" rel="noreferrer">
-                        <img
-                          src={r.picture}
-                          alt=""
-                          style={{ width: 56, height: 38, objectFit: 'cover', borderRadius: 4 }}
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                          }}
-                        />
-                      </a>
+              {items.map((it) => (
+                <tr key={it.idx}>
+                  <td style={{ textAlign: 'center' }}>{it.idx}</td>
+                  <td>{it.itemNo || ''}</td>
+                  <td>
+                    {it.img ? (
+                      <img
+                        src={it.img}
+                        alt=""
+                        style={{ width: 86, height: 86, objectFit: 'contain', background: '#f7f7f7' }}
+                      />
                     ) : (
-                      <span style={{ color: '#bbb' }}>—</span>
+                      '—'
                     )}
                   </td>
-                  <td style={td}>{r.description || '—'}</td>
-                  <td style={td}>{r.unitPrice || '—'}</td>
-                  <td style={td}>
-                    {r.link ? (
-                      <a href={r.link} target="_blank" rel="noreferrer">
+                  <td>{it.title || ''}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtPrice(it.price, it.currency)}</td>
+                  <td style={{ textAlign: 'center' }}>
+                    {it.url ? (
+                      <a href={it.url} target="_blank" rel="noreferrer">
                         链接
                       </a>
                     ) : (
-                      <span style={{ color: '#bbb' }}>—</span>
+                      '—'
                     )}
                   </td>
                 </tr>
@@ -279,24 +260,10 @@ export default function App() {
         )}
       </div>
 
-      {/* 一点元数据 */}
-      <div style={{ color: '#9aa0a6', marginTop: 10, fontSize: 12 }}>
-        {meta.source ? <>来源：{meta.source}；</> : null}
-        {meta.count ? <>后端统计：{meta.count} 条。</> : null}
+      {/* 页脚 */}
+      <div style={{ color: '#888', fontSize: 12, marginTop: 12 }}>
+        © MVP3 — 页面骨架（占位版）。确认部署稳定后，将逐步接回业务逻辑。
       </div>
     </div>
   );
 }
-
-const th = {
-  textAlign: 'left',
-  border: '1px solid #eee',
-  padding: '8px 10px',
-  whiteSpace: 'nowrap',
-};
-
-const td = {
-  border: '1px solid #f3f3f3',
-  padding: '8px 10px',
-  verticalAlign: 'top',
-};
