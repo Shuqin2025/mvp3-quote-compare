@@ -1,49 +1,44 @@
 <!doctype html>
 <html lang="zh">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MVP3 Quote Compare</title>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MVP3 Quote Compare</title>
 
-    <style>
-      body { font-family: sans-serif; margin: 1em; }
-      #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
-      #langSwitcher button { padding: 4px 8px; }
-    </style>
+  <style>
+    body { font-family: sans-serif; margin: 1em; }
+    #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
+    #langSwitcher button { padding: 4px 8px; }
+  </style>
 
-    <!-- UI 增强样式（主/次按钮、暗灰、加载态等） -->
-    <link rel="stylesheet" href="/ui-enhance.css?v=36" />
-  </head>
-  <body>
-    <!-- 语言切换（只做演示，不改 UI 文案；文案由 i18n.js 在页面运行后覆盖） -->
-    <div id="langSwitcher">
-      <button onclick="i18n.setLang('zh')">CN 中文</button>
-      <button onclick="i18n.setLang('de')">DE Deutsch</button>
-      <button onclick="i18n.setLang('en')">GB English</button>
-    </div>
+  <!-- UI 增强样式 -->
+  <link rel="stylesheet" href="/ui-enhance.css?v=36" />
+</head>
+<body>
+  <!-- 语言切换（演示） -->
+  <div id="langSwitcher">
+    <button onclick="i18n.setLang('zh')">CN 中文</button>
+    <button onclick="i18n.setLang('de')">DE Deutsch</button>
+    <button onclick="i18n.setLang('en')">GB English</button>
+  </div>
 
-    <!-- React App 挂载点 -->
-    <div id="root"></div>
+  <!-- React App 挂载点 -->
+  <div id="root"></div>
 
-    <!-- 语言文件（安全；仅覆盖语言的静态脚本） -->
-    <script src="/i18n.js?v=36"></script>
+  <!-- 语言文件（仅覆盖文案） -->
+  <script src="/i18n.js?v=36"></script>
 
-    <!-- 仅供非跨域口径演示（安全） -->
-    <script src="/lang-fetch.js?v=36"></script>
+  <!-- ⚠️ 移除这行！它会向当前域发 /parse?url=... 的演示请求，干扰真实后端
+  <script src="/lang-fetch.js?v=36"></script>
+  -->
 
-    <!-- UI 增强脚本（主/次按钮、暗灰、开发提示等） -->
-    <script src="/ui-enhance.js?v=36"></script>
+  <!-- UI 增强脚本 -->
+  <script src="/ui-enhance.js?v=36"></script>
 
-    <!-- ✅ 浏览器全局的极简 polyfill：给少量依赖提供 global / process.env（ExcelJS 方案稳妥） -->
-    <script>
-      window.global = window;
-      window.process = window.process || { env: {} };
-    </script>
+  <!-- SheetJS：导出 .xlsx -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-    <!-- ⚠️ 注意：我们已改用 ExcelJS，不再需要引入 xlsx 的 CDN 脚本 -->
-    <!-- <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script> -->
-
-    <!-- Vite / React 入口（构建时会被替换为 /assets/index-*.js） -->
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+  <!-- Vite / React 入口 -->
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 </html>
