@@ -1,256 +1,246 @@
 // frontend/src/App.jsx
-import React, { useMemo, useRef, useState } from "react";
-import "./app.css";
+import React, { useMemo, useState } from 'react';
+import axios from 'axios';
 
-// ExcelJS 通过 index.html 里的 CDN 注入到 window.ExcelJS
-const getExcelJS = () => window.ExcelJS;
-
-// 从 ?api= 读后端地址
-function getApiBase() {
-  const u = new URL(location.href);
-  const api = u.searchParams.get("api");
-  return (api && api.trim()) || "";
+// 从 URL ?api=<backend> 读取 API 基址（无参时提示配置）
+function readApiBase() {
+  const u = new URL(window.location.href);
+  const api = u.searchParams.get('api');
+  return api ? api.replace(/\/+$/, '') : '';
 }
+const API_BASE = readApiBase();
 
-const LANGS = {
+const i18nText = {
   zh: {
-    title: "MVP3 — App",
-    inputPlaceholder: "粘贴要抓取的目录页 URL（例如某电商分类页）",
-    btnFetch: "抓取目录",
-    preview: "预览（前 {{n}} 条）",
-    exportExcel: "导出 Excel（.xlsx）",
-    fetchedCount: "抓取成功：共 {{n}} 条（预览前 {{m}} 条）",
-    linkText: "链接",
-    th: ["Item No.", "Picture", "Description", "MOQ", "Unit Price", "Link"]
+    title: 'MVP3 — App',
+    hint: '这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。',
+    inputPh: '粘贴要抓取的目录页 URL（例如某电商分类页）',
+    fetch: '抓取目录',
+    preview: '预览（前 %n 条）',
+    export: '导出 Excel（.xlsx）',
+    fetched: '抓取成功：共 %n 条（预览前 %m 条）',
+    failed: '抓取失败：响应格式不正确，items 不是数组。',
+    link: '链接'
   },
   de: {
-    title: "MVP3 — App",
-    inputPlaceholder: "Kategorie-URL einfügen (z. B. Shop-Kategorie)",
-    btnFetch: "Katalog holen",
-    preview: "Vorschau (erste {{n}})",
-    exportExcel: "Excel exportieren (.xlsx)",
-    fetchedCount: "Erfolg: {{n}} Einträge (Vorschau {{m}})",
-    linkText: "Link",
-    th: ["Item No.", "Picture", "Description", "MOQ", "Unit Price", "Link"]
+    title: 'MVP3 — App',
+    hint: 'Dies ist ein Platzhalter ohne Logik, um die Stabilität der Bereitstellung zu prüfen.',
+    inputPh: 'Kategorie-URL einfügen (z. B. Shop-Kategorie)',
+    fetch: 'Katalog abrufen',
+    preview: 'Vorschau (erste %n)',
+    export: 'Excel exportieren (.xlsx)',
+    fetched: 'Erfolg: Insgesamt %n Einträge (zeige %m).',
+    failed: 'Fehler: Unerwartetes Antwortformat – items ist kein Array.',
+    link: 'Link'
   },
   en: {
-    title: "MVP3 — App",
-    inputPlaceholder: "Paste a category URL (e.g., shop listing page)",
-    btnFetch: "Fetch",
-    preview: "Preview (first {{n}})",
-    exportExcel: "Export Excel (.xlsx)",
-    fetchedCount: "Fetched: {{n}} (preview {{m}})",
-    linkText: "Link",
-    th: ["Item No.", "Picture", "Description", "MOQ", "Unit Price", "Link"]
-  }
+    title: 'MVP3 — App',
+    hint: 'Placeholder page (no logic) only to validate deployment stability.',
+    inputPh: 'Paste a category URL (e.g., shop category)',
+    fetch: 'Fetch catalog',
+    preview: 'Preview (first %n)',
+    export: 'Export Excel (.xlsx)',
+    fetched: 'Fetched: %n items (showing %m).',
+    failed: 'Fetch failed: unexpected format, items is not an array.',
+    link: 'Link'
+  },
 };
 
-function useI18n() {
-  const [lang, setLang] = useState("zh");
-  const T = useMemo(() => LANGS[lang], [lang]);
-  return { T, lang, setLang };
+function useLang() {
+  const [lang, setLang] = useState(localStorage.getItem('mvp3_lang') || 'zh');
+  const t = useMemo(() => i18nText[lang] || i18nText.zh, [lang]);
+  const apiLang = useMemo(() => (lang === 'de' ? 'de' : lang === 'en' ? 'en' : 'zh'), [lang]);
+  const set = (l) => { localStorage.setItem('mvp3_lang', l); setLang(l); };
+  return { lang, t, setLang: set, apiLang };
 }
 
 export default function App() {
-  const { T, lang, setLang } = useI18n();
-  const API_BASE = getApiBase();
-  const [url, setUrl] = useState("https://www.s-impuls-shop.de/catalog/home-cinema/audio-kabel");
-  const [limit, setLimit] = useState(50);
-  const [rows, setRows] = useState([]);
+  const { lang, t, setLang, apiLang } = useLang();
+  const [url, setUrl] = useState('https://www.s-impuls-shop.de/catalog/home-cinema/audio-kabel');
+  const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [limit, setLimit] = useState(50);
 
-  const listRef = useRef(null);
-
-  async function fetchCatalog() {
+  async function fetchList() {
     if (!API_BASE) {
-      alert("后端 API 未指定。请在预览地址后加 ?api=你的后端域名");
+      alert('缺少 ?api= 后端地址参数，例如：?api=https://<你的-mvp2-backend>.onrender.com');
       return;
     }
-    if (!url) return;
     setLoading(true);
     try {
-      const q = new URL(API_BASE + "/v1/api/catalog/parse");
-      q.searchParams.set("url", url);
-      q.searchParams.set("limit", String(limit));
-      console.log("[mvp3] fetch ->", q.toString());
-
-      const r = await fetch(q.toString());
-      const data = await r.json().catch(() => ({}));
-
-      if (!Array.isArray(data.items)) {
-        console.error("[mvp3] fetch error:", data);
-        alert("抓取失败：响应格式不正确，items 不是数组。");
-        return;
-      }
-      setRows(data.items || []);
+      const resp = await axios.get(`${API_BASE}/v1/api/catalog/parse`, {
+        params: { url, limit },
+        headers: { 'X-Lang': apiLang },
+      });
+      const items = resp?.data?.items;
+      if (!Array.isArray(items)) throw new Error('items_not_array');
+      setList(items);
     } catch (e) {
-      console.error(e);
-      alert("抓取失败，请刷新页面重试。");
+      console.error('[mvp3] fetch error:', e);
+      alert(t.failed);
+      setList([]);
     } finally {
       setLoading(false);
     }
   }
 
-  function PreviewTable() {
-    const th = T.th;
-    const preview = rows.slice(0, limit);
+  // —— Excel 导出：使用 exceljs，把图片真正嵌入 xlsx —— //
+  async function exportExcel() {
+    if (!window.ExcelJS) {
+      alert('ExcelJS 未加载');
+      return;
+    }
+    const ExcelJS = window.ExcelJS;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('catalog');
+
+    ws.columns = [
+      { header: 'Item No.', key: 'sku', width: 22 },
+      { header: 'Picture', key: 'pic', width: 18 }, // 用于放图
+      { header: 'Description', key: 'title', width: 60 },
+      { header: 'MOQ', key: 'moq', width: 10 },
+      { header: 'Unit Price', key: 'price', width: 14 },
+      { header: 'Link', key: 'url', width: 80 },
+    ];
+
+    // 逐行写入（先写文本，图片后贴）
+    list.forEach((it) => {
+      ws.addRow({
+        sku: it.sku || '',
+        pic: '', // 这里先留空，下面贴图
+        title: it.title || '',
+        moq: it.moq || '',
+        price: it.price || '',
+        url: it.url || '',
+      });
+    });
+
+    // 给“Link”列加超链接样式
+    for (let r = 2; r <= list.length + 1; r++) {
+      const cell = ws.getCell(`F${r}`);
+      const url = list[r - 2]?.url || '';
+      if (url) {
+        cell.value = { text: t.link, hyperlink: url };
+        cell.font = { color: { argb: 'FF1F497D' }, underline: true };
+      }
+      // Picture 列设合适行高
+      ws.getRow(r).height = 72;
+    }
+
+    // 嵌入图片（并不是所有站都允许跨域拉图，这里前端直接 fetch blob → buffer 再嵌）
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i];
+      const imgUrl = it.img || '';
+      if (!imgUrl) continue;
+
+      try {
+        const resp = await fetch(imgUrl, { mode: 'no-cors' }).catch(() => null) || await fetch(imgUrl);
+        const blob = await resp.blob();
+        const buffer = await blob.arrayBuffer();
+
+        // 猜扩展名
+        const isPng = /png$/i.test(imgUrl) || blob.type.includes('png');
+        const imageId = wb.addImage({
+          buffer: Buffer.from(buffer),
+          extension: isPng ? 'png' : 'jpeg',
+        });
+
+        // 贴到 B 列（第 i+2 行）
+        const row = i + 2;
+        ws.addImage(imageId, {
+          tl: { col: 1 + 0.15, row: row - 1 + 0.15 }, // B列=1（0-based）
+          ext: { width: 96, height: 64 },
+          editAs: 'twoCell',
+        });
+      } catch (err) {
+        console.warn('embed image failed', imgUrl, err);
+      }
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const file = `catalog-preview-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.xlsx`;
+    // FileSaver 不要求，但原生也能下载：
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = file;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // 语言按钮
+  function Langs() {
     return (
-      <div className="preview">
-        <table>
-          <thead>
-            <tr>
-              {th.map((t, i) => (
-                <th key={i}>{t}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {preview.map((it, idx) => (
-              <tr key={idx}>
-                <td>{it.sku || ""}</td>
-                <td>
-                  {it.img ? (
-                    <img src={`${API_BASE}/v1/api/img?url=${encodeURIComponent(it.img)}`} width={72} height={72}
-                      style={{ objectFit: "contain", borderRadius: 6, border: "1px solid #ddd" }} />
-                  ) : null}
-                </td>
-                <td>{it.title || ""}</td>
-                <td>{it.moq || ""}</td>
-                <td>
-                  {it.price ? `${it.price}${it.currency || ""}` : ""}
-                </td>
-                <td>
-                  {it.url ? (
-                    <a href={it.url} target="_blank" rel="noreferrer">{T.linkText}</a>
-                  ) : ""}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div id="langSwitcher">
+        <button onClick={() => setLang('zh')}>CN 中文</button>
+        <button onClick={() => setLang('de')}>DE Deutsch</button>
+        <button onClick={() => setLang('en')}>GB English</button>
       </div>
     );
   }
 
-  async function exportExcel() {
-    if (!rows.length) return;
-
-    const ExcelJS = getExcelJS();
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("catalog");
-
-    // 列宽行高
-    ws.columns = [
-      { header: T.th[0], key: "sku", width: 22 },
-      { header: T.th[1], key: "picture", width: 16 },
-      { header: T.th[2], key: "title", width: 60 },
-      { header: T.th[3], key: "moq", width: 10 },
-      { header: T.th[4], key: "price", width: 14 },
-      { header: T.th[5], key: "link", width: 80 },
-    ];
-
-    // 表头加粗
-    ws.getRow(1).font = { bold: true };
-
-    // 逐行写入，并在第 2 列插入图片
-    const imagePromises = rows.map(async (it, idx) => {
-      const rowIndex = idx + 2;
-      ws.addRow({
-        sku: it.sku || "",
-        title: it.title || "",
-        moq: it.moq || "",
-        price: it.price ? `${it.price}${it.currency || ""}` : "",
-        link: it.url || ""
-      });
-
-      // 超链接
-      if (it.url) {
-        ws.getCell(rowIndex, 6).value = { text: T.linkText, hyperlink: it.url };
-        ws.getCell(rowIndex, 6).font = { color: { argb: "FF1F4E79" }, underline: true };
-      }
-
-      // 图片（通过后端代理取图，避免 CORS）
-      if (it.img) {
-        try {
-          const imgUrl = `${API_BASE}/v1/api/img?url=${encodeURIComponent(it.img)}`;
-          const resp = await fetch(imgUrl);
-          const buf = await resp.arrayBuffer();
-
-          // 试探图片类型
-          let ext = "jpeg";
-          const ctype = resp.headers.get("content-type") || "";
-          if (/png/i.test(ctype)) ext = "png";
-          if (/jpe?g/i.test(ctype)) ext = "jpeg";
-          const imgId = wb.addImage({ buffer: Buffer.from(buf), extension: ext });
-
-          // 在第 rowIndex 行、第 2 列放一个 64x64 的缩略图
-          const top = (rowIndex - 1) * 20 + 2; // 行高约 20，微调
-          ws.addImage(imgId, {
-            tl: { col: 1.2, row: rowIndex - 0.7 },
-            ext: { width: 64, height: 64 },
-            editAs: "oneCell",
-          });
-
-          // 行高稍微大一点
-          ws.getRow(rowIndex).height = 54;
-        } catch (e) {
-          // 忽略单张图片失败
-          console.warn("image error", it.img, e);
-        }
-      }
-    });
-
-    await Promise.all(imagePromises);
-
-    const buf = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
-    a.download = `catalog-${ts}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   return (
-    <div className="app">
-      <div className="lang">
-        <button onClick={() => setLang("zh")}>CN 中文</button>
-        <button onClick={() => setLang("de")}>DE Deutsch</button>
-        <button onClick={() => setLang("en")}>GB English</button>
+    <div className="container">
+      <Langs />
+      <h1>{t.title}</h1>
+      <div className="alert alert-green">{t.hint}</div>
+
+      <div className="alert alert-amber">
+        {t.fetched.replace('%n', list.length).replace('%m', Math.min(limit, list.length || limit))}
       </div>
 
-      <h1>{T.title}</h1>
-
-      <div className="tip ok">
-        这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。
-      </div>
-
-      <div className="tip warn">
-        {T.fetchedCount.replace("{{n}}", rows.length).replace("{{m}}", limit)}
-      </div>
-
-      <div className="toolbar">
+      <div className="tool-row">
         <input
-          placeholder={T.inputPlaceholder}
+          className="url-input"
           value={url}
-          onChange={(e) => setUrl(e.target.value)}
+          onChange={e => setUrl(e.target.value)}
+          placeholder={t.inputPh}
         />
-        <button disabled={loading} onClick={fetchCatalog}>
-          {loading ? "抓取中..." : T.btnFetch}
+        <button className="btn primary" disabled={loading} onClick={fetchList}>
+          {loading ? '抓取中…' : t.fetch}
         </button>
 
-        <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
-          {[50, 100, 200].map((n) => <option key={n} value={n}>{T.preview.replace("{{n}}", n)}</option>)}
+        <select value={limit} onChange={e => setLimit(parseInt(e.target.value, 10))}>
+          {[50, 100, 150, 200, 300, 500].map(n => <option value={n} key={n}>{t.preview.replace('%n', n)}</option>)}
         </select>
 
-        <button onClick={exportExcel}>{T.exportExcel}</button>
+        <button className="btn" onClick={exportExcel}>{t.export}</button>
       </div>
 
-      <div ref={listRef}>
-        <PreviewTable />
+      <div className="placeholder">
+        {list.length > 0 && (
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Item No.</th>
+                <th>Picture</th>
+                <th>Description</th>
+                <th>MOQ</th>
+                <th>Unit Price</th>
+                <th>Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.slice(0, limit).map((it, idx) => (
+                <tr key={idx}>
+                  <td>{idx + 1}</td>
+                  <td>{it.sku}</td>
+                  <td>
+                    {it.img ? <img src={it.img} alt="" style={{width: 72, height: 48, objectFit:'contain'}}/> : null}
+                  </td>
+                  <td>{it.title}</td>
+                  <td>{it.moq || '—'}</td>
+                  <td>{it.price ? `${it.price}${it.currency || ''}` : '—'}</td>
+                  <td><a href={it.url} target="_blank" rel="noreferrer">链接</a></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
+
+      <footer className="ft">© MVP3 — 页面骨架（占位版）。确认部署稳定后，将逐步接回业务逻辑。</footer>
     </div>
   );
 }
