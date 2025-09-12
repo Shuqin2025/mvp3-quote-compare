@@ -1,29 +1,27 @@
 <!doctype html>
 <html lang="zh">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MVP3 Quote Compare</title>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MVP3 — App</title>
+  <link rel="stylesheet" href="/ui-enhance.css?v=36" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; margin: 14px; }
+    #langSwitcher { margin-bottom: 10px; display:flex; gap:8px; }
+    #langSwitcher button { padding: 4px 10px; }
+  </style>
+</head>
+<body>
+  <div id="langSwitcher">
+    <button onclick="i18n.setLang('zh')">CN 中文</button>
+    <button onclick="i18n.setLang('de')">DE Deutsch</button>
+    <button onclick="i18n.setLang('en')">GB English</button>
+  </div>
 
-    <style>
-      body { font-family: sans-serif; margin: 1em; }
-      #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
-      #langSwitcher button { padding: 4px 8px; }
-    </style>
+  <div id="root"></div>
 
-    <link rel="stylesheet" href="/ui-enhance.css?v=36" />
-  </head>
-  <body>
-    <div id="langSwitcher">
-      <button onclick="i18n.setLang('zh')">CN 中文</button>
-      <button onclick="i18n.setLang('de')">DE Deutsch</button>
-      <button onclick="i18n.setLang('en')">GB English</button>
-    </div>
-
-    <div id="root"></div>
-
-    <script src="/i18n.js?v=36"></script>
-    <script src="/ui-enhance.js?v=36"></script>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+  <script src="/i18n.js?v=36"></script>
+  <script src="/ui-enhance.js?v=36"></script>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
 </html>
