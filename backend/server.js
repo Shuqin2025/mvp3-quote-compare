@@ -1,149 +1,207 @@
 // backend/server.js
 import express from "express";
 import cors from "cors";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
-import PDFDocument from "pdfkit";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import fetch from "node-fetch";
+import { load as cheerioLoad } from "cheerio";
 
 const app = express();
-const PORT = process.env.PORT || 5190;
+const PORT = process.env.PORT || 3000;
 
-/** ---------------- CORS ----------------
- * 上线后可收紧 origin 白名单
- */
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Accept"],
-  })
-);
+app.use(cors());
+app.set("trust proxy", true);
 
-// 解析 JSON（提高上限，避免大文本触发 413）
-app.use(express.json({ limit: "4mb" }));
-
-/** ---------------- 健康检查 ---------------- */
-app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "mvp3-backend", ts: Date.now() });
-});
-app.get("/v1/api/health", (_req, res) => {
-  res.json({ ok: true, service: "mvp3-backend", ts: Date.now() });
-});
-
-/** ---------------- 首页兜底 ---------------- */
-app.get("/", (_req, res) => {
-  res.type("text/plain").send("MVP3 backend is running. Try /v1/api/health");
-});
-
-/** ---------------- 生成 PDF（流式返回） ----------------
- * POST /v1/api/pdf
- * body:
- *   { title: string, content?: string, body?: string }
- * - 默认 inline 在浏览器打开；?dl=1 强制下载
- */
-app.post("/v1/api/pdf", (req, res) => {
-  // 1) 参数兜底
-  const { title = "报价单 / Quote", content, body } = req.body || {};
-  const text =
-    (typeof content === "string" && content.trim()) ||
-    (typeof body === "string" && body) ||
-    "";
-
-  if (!title || !text) {
-    return res
-      .status(400)
-      .json({ ok: false, error: "ROWS_REQUIRED_OR_EMPTY_TEXT" });
-  }
-
-  // 2) 响应头：application/pdf + inline/attachment
-  const inline = !("dl" in req.query);
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `${inline ? "inline" : "attachment"}; filename="quote.pdf"`
-  );
-
-  // 3) 创建 PDF 文档并直接 pipe 到响应
-  const doc = new PDFDocument({ size: "A4", margin: 56 }); // 约 2cm 边距
-
-  // —— 关键：处理异步错误，避免 500
-  const onFatal = (err) => {
-    console.error("[/v1/api/pdf] stream error:", err);
-    // 如果尚未发过头，就回 JSON 错误；否则尽量结束流
-    if (!res.headersSent) {
-      try {
-        res.status(500).json({ ok: false, error: "INTERNAL_ERROR" });
-      } catch {}
-    } else {
-      try {
-        res.end();
-      } catch {}
-    }
-  };
-  doc.on("error", onFatal);
-  res.on("error", onFatal);
-  res.on("close", () => {
-    // 客户端断开时安全结束，避免 write after end
-    try {
-      doc.end();
-    } catch {}
-  });
-
-  doc.pipe(res);
-
-  // 4) 字体：优先加载项目自带的中文字体；没有就退回内置 Helvetica
-  const fontCandidates = [
-    path.join(__dirname, "fonts", "NotoSansSC-Regular.otf"),
-    path.join(__dirname, "fonts", "NotoSansSC-Regular.ttf"),
-    path.join(__dirname, "fonts", "NotoSansCJKsc-Regular.otf"),
-  ];
-  let zhFont = null;
-  for (const p of fontCandidates) {
-    if (fs.existsSync(p)) {
-      zhFont = p;
-      break;
-    }
-  }
-  if (zhFont) {
-    try {
-      doc.registerFont("zh", zhFont);
-      doc.font("zh");
-    } catch (e) {
-      console.warn("注册中文字体失败，回退内置字体：", e?.message || e);
-    }
-  }
-
-  // 5) 内容
+/** 小工具：绝对化 URL */
+function absolutize(href, base) {
   try {
-    doc.fontSize(22).text(String(title), { align: "center" });
-    doc.moveDown(1.2);
+    return new URL(href, base).toString();
+  } catch {
+    return href || "";
+  }
+}
 
-    doc.fontSize(12).text(String(text), {
-      align: "left",
-      lineGap: 4,
+/** 从 s-impuls-shop 的商品链接推断 Item No.（SKU） */
+function inferSkuFromUrl(itemUrl) {
+  try {
+    const u = new URL(itemUrl);
+    const last = u.pathname.split("/").filter(Boolean).pop() || "";
+    const raw = decodeURIComponent(last.replace(/\.html?$/i, ""));
+    // 例如：30805-mhq-slim  →  30805-MHQ-SLIM
+    if (/^\d/.test(raw)) {
+      return raw.replace(/[^0-9a-z-]+/gi, "").replace(/-/g, "-").toUpperCase();
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/** 解析 s-impuls-shop 分类页 */
+function parseImpulsCategory(html, pageUrl, limit = 50) {
+  const $ = cheerioLoad(html);
+
+  // 页面主体所有可能的商品卡片（结构在不同目录有轻微差别，这里穷举一些常见选择器）
+  const cards = $(
+    // 常见卡片容器里 a[href^="/product/…"]
+    '.product-list a[href*="/product/"], \
+     .product-box a[href*="/product/"], \
+     a.product--image[href*="/product/"], \
+     .listing a[href*="/product/"]'
+  )
+    .filter((i, el) => {
+      const href = $(el).attr("href") || "";
+      return /\/product\//i.test(href);
+    })
+    // 同一个卡片里可能匹配到多个 a，这里去重到“卡片级”
+    .map((i, el) => $(el).closest("article, .product-box, li, .product--box")[0])
+    .toArray()
+    .filter(Boolean);
+
+  const items = [];
+  for (const card of cards) {
+    const $card = $(card);
+
+    // 链接
+    let linkEl =
+      $card.find('a[href*="/product/"]').get(0) ||
+      $card.find("a").get(0);
+    const href = linkEl ? $(linkEl).attr("href") || "" : "";
+    const url = absolutize(href, pageUrl);
+
+    // 标题（优先标题元素，其次图片 alt，再次链接标题）
+    const title =
+      ($card.find(".product-title, .product--title, .title, h3, h2").first().text() || "").trim() ||
+      ($card.find("img[alt]").attr("alt") || "").trim() ||
+      ($(linkEl).attr("title") || "").trim();
+
+    // 图片（优先卡片内 img，其次 data-src/data-original）
+    let img =
+      $card.find("img").attr("src") ||
+      $card.find("img").attr("data-src") ||
+      $card.find("img").attr("data-original") ||
+      "";
+    img = absolutize(img, pageUrl);
+
+    // 价格与货币（如果有）
+    let priceText =
+      $card.find(".price, .product-price, .amount, .price--default").first().text().trim() || "";
+    priceText = priceText.replace(/\s+/g, " ");
+    let price = "";
+    let currency = "";
+    const m = priceText.match(/([€$£])\s*([\d.,]+)/);
+    if (m) {
+      currency = m[1];
+      price = m[2].replace(/\./g, "").replace(",", ".");
+    }
+
+    // MOQ（通常目录页没有，这里置空留给将来扩展）
+    const moq = "";
+
+    // SKU
+    const sku = inferSkuFromUrl(url);
+
+    // 兜底：标题或链接不齐就跳过
+    if (!url || !title) continue;
+
+    items.push({ sku, title, url, img, price, currency, moq });
+    if (items.length >= Number(limit || 50)) break;
+  }
+
+  return items;
+}
+
+/** 统一抓取器 */
+async function fetchHtml(targetUrl) {
+  const res = await fetch(targetUrl, {
+    headers: {
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "accept-language": "de,en;q=0.9,zh;q=0.8",
+    },
+    redirect: "follow",
+    // Render 免费实例偶发超时，设长一点
+    timeout: 30000,
+  });
+  if (!res.ok) {
+    throw new Error(`Fetch HTML failed: ${res.status} ${res.statusText}`);
+  }
+  return await res.text();
+}
+
+/** API：解析分类页 */
+app.get("/v1/api/catalog/parse", async (req, res) => {
+  try {
+    const raw = (req.query.url || "").toString();
+    const limit = Number(req.query.limit || 50);
+    if (!raw) return res.status(400).json({ error: "missing url" });
+
+    const pageUrl = decodeURIComponent(raw);
+    const html = await fetchHtml(pageUrl);
+
+    let items = [];
+    const host = new URL(pageUrl).hostname;
+
+    if (/s-impuls-shop\.de$/i.test(host)) {
+      items = parseImpulsCategory(html, pageUrl, limit);
+    } else {
+      // 默认兜底：抓取页面上所有 /product/ 链接
+      const $ = cheerioLoad(html);
+      $("a[href*='/product/']").each((_, a) => {
+        const href = $(a).attr("href") || "";
+        const url = absolutize(href, pageUrl);
+        const title = ($(a).attr("title") || $(a).text() || "").trim();
+        const img = absolutize($(a).find("img").attr("src") || "", pageUrl);
+        const sku = inferSkuFromUrl(url);
+        if (url && title) items.push({ sku, title, url, img, price: "", currency: "", moq: "" });
+      });
+      items = items.slice(0, limit);
+    }
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.json({
+      url: pageUrl,
+      count: items.length,
+      items,
     });
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message || err) });
+  }
+});
+
+/** 图片代理（用于 Excel 插入真实图片，避免前端跨域） */
+app.get("/v1/api/img", async (req, res) => {
+  try {
+    const raw = (req.query.url || "").toString();
+    if (!raw) return res.status(400).send("missing url");
+    const imgUrl = decodeURIComponent(raw);
+
+    const r = await fetch(imgUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        referer: new URL(imgUrl).origin + "/",
+      },
+      redirect: "follow",
+      timeout: 30000,
+    });
+    if (!r.ok) {
+      res.status(r.status).send(`fetch image failed: ${r.status}`);
+      return;
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    const ctype = r.headers.get("content-type") || "image/jpeg";
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.type(ctype).send(buf);
   } catch (e) {
-    // 布局/字体异常也保护
-    return onFatal(e);
-  }
-
-  // 6) 结束：触发流式发送
-  doc.end();
-});
-
-/** ---------------- 全局错误兜底（可选） ---------------- */
-app.use((err, _req, res, _next) => {
-  console.error("[Unhandled]", err);
-  if (!res.headersSent) {
-    res.status(500).json({ ok: false, error: "Internal Server Error" });
+    res.status(500).send(String(e));
   }
 });
 
-/** ---------------- 启动 ---------------- */
+/** 健康检查 */
+app.get("/v1/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
+
 app.listen(PORT, () => {
-  console.log(`[mvp3-backend] running at http://0.0.0.0:${PORT}`);
+  console.log(`[mvp2-backend] up on :${PORT}`);
 });
