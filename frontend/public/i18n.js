@@ -10,65 +10,42 @@
   const dict = {
     zh: {
       app_name: "云贸星 智能表格生成器",
-      placeholder: "在此粘贴目录型页面链接（例如某一类目的商品列表页）",
+      subtitle: "输入目录型网页链接，秒生成 Excel 产品表格",
+      placeholder: "在此粘贴目录型页面链接",
       btn_fetch: "抓取目录",
-      btn_export: "导出 Excel（.xlsx）",
-      btn_clear: "清空数据",
-      page_size: "页量",
-      toast_ok: "抓取成功：共 {n} 条（预览前 {m} 条）",
-      toast_zero: "暂无数据（预览前 0 条）",
-      toast_fail_prefix: "抓取失败：",
-      toast_exporting: "正在生成 Excel…",
-      link_text: "链接",
+      btn_export: "导出 Excel",
+      btn_clear: "清空",
       footer_support: "支持的网站",
       footer_privacy: "隐私政策",
       footer_contact: "联系我们",
     },
     de: {
       app_name: "Yunivera DataBridge",
-      placeholder:
-        "Katalog-/Listen-URL hier einfügen (z. B. eine Produktlisten-Seite)",
+      subtitle: "Fügen Sie eine Katalog-URL ein, um sofort Excel-Tabellen zu generieren",
+      placeholder: "Katalog-/Listen-URL hier einfügen",
       btn_fetch: "Katalog abrufen",
-      btn_export: "Excel exportieren (.xlsx)",
+      btn_export: "Excel exportieren",
       btn_clear: "Daten leeren",
-      page_size: "Anzahl / Seite",
-      toast_ok: "Erfolg: {n} Einträge (zeige zuerst {m})",
-      toast_zero: "Keine Daten (zeige zuerst 0)",
-      toast_fail_prefix: "Fehlgeschlagen: ",
-      toast_exporting: "Excel wird erstellt…",
-      link_text: "Link",
       footer_support: "Unterstützte Websites",
       footer_privacy: "Datenschutz",
       footer_contact: "Kontakt",
     },
     en: {
       app_name: "Yunivera DataBridge",
-      placeholder:
-        "Paste a catalog/list page URL here (e.g. a category product list)",
+      subtitle: "Paste a catalog/list URL to instantly generate Excel table",
+      placeholder: "Paste catalog/list page URL here",
       btn_fetch: "Fetch Catalog",
-      btn_export: "Export Excel (.xlsx)",
+      btn_export: "Export Excel",
       btn_clear: "Clear",
-      page_size: "Page size",
-      toast_ok: "Success: {n} items (showing first {m})",
-      toast_zero: "No data (showing first 0)",
-      toast_fail_prefix: "Fetch failed: ",
-      toast_exporting: "Generating Excel…",
-      link_text: "link_text",
       footer_support: "Supported Sites",
       footer_privacy: "Privacy",
       footer_contact: "Contact us",
     },
   };
 
-  function t(key, vars) {
+  function t(key) {
     const lang = window.__currentLang || pick();
-    let s = (dict[lang] && dict[lang][key]) || dict.en[key] || key;
-    if (vars) {
-      for (const k in vars) {
-        s = s.replace(new RegExp("\\{" + k + "\\}", "g"), String(vars[k]));
-      }
-    }
-    return s;
+    return (dict[lang] && dict[lang][key]) || dict.en[key] || key;
   }
 
   function set(lang) {
