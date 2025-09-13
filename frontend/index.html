@@ -43,7 +43,6 @@
   </style>
 </head>
 <body>
-
   <!-- 语言切换 -->
   <div class="langbar">
     <button class="btn btn-ghost" onclick="i18n.set('zh')" data-i18n="lang_cn">CN 中文</button>
@@ -100,7 +99,7 @@
     <a href="#" target="_blank" data-i18n="footer_contact">联系我们</a>
   </footer>
 
-  <!-- 必须先引入 ExcelJS / FileSaver -->
+  <!-- 必须先引入 ExcelJS / FileSaver（用于内嵌图片） -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
   <script src="/ui-enhance.js?v=36"></script>
@@ -133,7 +132,7 @@
     }
     function hideToast(){ $toast.style.display = 'none'; }
 
-    // 暴露给 ui-enhance.js 使用，用于“正在生成 Excel…”
+    // 暴露给 ui-enhance.js 使用（导出提示）
     window.__showToast = showToast;
     window.__hideToast = hideToast;
     window.__T = T;
