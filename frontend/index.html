@@ -1,191 +1,141 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>Yunivera DataBridge</title>
-
-  <link rel="stylesheet" href="/ui-enhance.css?v=36" />
-  <!-- 注意：不要加 /public 前缀 -->
-  <script src="/i18n.js?v=1"></script>
-
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>云贸星 智能表格生成器 · Yunivera DataBridge</title>
+  <link rel="icon" href="/favicon.ico">
   <style>
-    :root{
-      --border:#e5e7eb; --muted:#6b7280; --bg:#fff;
-      --okbg:#E8F5E9; --okbd:#C8E6C9; --warnbg:#FFF8E1; --warnbd:#FFECB3;
-      --primary:#2563eb; --primary-d:#1d4ed8;
-    }
+    :root{--bg:#fff;--text:#111;--muted:#6b7280;--brand:#111827}
     *{box-sizing:border-box}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,'Noto Sans',sans-serif;margin:16px;background:#fafafa;color:#111}
-    .langbar{display:flex;gap:8px;margin-bottom:8px}
-    .btn{padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;cursor:pointer}
-    .btn:hover{background:#f8fafc}
-    .btn-primary{background:var(--primary);border-color:var(--primary-d);color:#fff}
-    .btn-primary:hover{filter:brightness(0.97)}
-    .btn-ghost{background:#f8fafc}
-    .title{font-size:28px;font-weight:800;margin:6px 0 2px}
-    .subtitle{font-size:14px;color:#666;margin:0 0 16px}
-    .card{border:1px solid var(--border);border-radius:12px;background:#fff;padding:12px}
-    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
-    .input{flex:1;min-width:320px;padding:9px 10px;border:1px solid var(--border);border-radius:10px;background:#fff}
-    select.btn{padding:8px 10px}
-    .alert{padding:10px 12px;border-radius:10px;margin:8px 0;display:none}
-    .alert-ok{background:var(--okbg);border:1px solid var(--okbd)}
-    .alert-warn{background:var(--warnbg);border:1px solid var(--warnbd)}
-    .result-box{min-height:420px;background:repeating-linear-gradient(45deg,#fafafa 0,#fafafa 10px,#f4f4f4 10px,#f4f4f4 20px);
-      border:1px dashed #ddd;border-radius:12px;padding:10px}
-    table{width:100%;border-collapse:collapse;background:#fff}
-    thead th{background:#fafafa}
-    th,td{border-bottom:1px solid #eee;padding:8px;vertical-align:top}
-    th{font-weight:600}
-    .muted{color:#9ca3af}
-    footer{margin-top:28px;color:#666;font-size:13px;display:flex;gap:16px}
-    footer a{color:#3b82f6;text-decoration:none}
-    footer a:hover{text-decoration:underline}
+    body{margin:0;background:#fafafa;color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans",sans-serif}
+    .wrap{max-width:1160px;margin:0 auto;padding:18px 16px 28px}
+    .langbar{display:flex;gap:8px;margin-bottom:10px}
+    .langbar button{padding:6px 10px;border:1px solid #e5e7eb;background:#fff;border-radius:8px;cursor:pointer}
+    .langbar button.active{background:#2563eb;color:#fff;border-color:#2563eb}
+    h1{margin:4px 0 2px;font-size:26px;font-weight:800;color:var(--brand)}
+    .subtitle{margin:0 0 14px;color:var(--muted)}
+    .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+    .toolbar input[type="text"]{flex:1;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;outline:none}
+    .toolbar select,.toolbar button{height:38px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;padding:0 10px;cursor:pointer}
+    .toolbar .primary{background:#2563eb;border-color:#2563eb;color:#fff}
+    .panel{background:#fff;border:1px solid #e5e7eb;border-radius:10px}
+    /* 结果区：强制为纯白，无底纹 */
+    #panel-body{min-height:360px;background:#fff;border-radius:10px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid #f1f5f9;text-align:left;vertical-align:middle}
+    th{font-weight:700}
+    .muted{color:var(--muted)}
+    /* toast */
+    .toast{margin:10px 0 0;background:#fef3c7;border:1px solid #fde68a;color:#92400e;padding:10px 12px;border-radius:8px;display:none}
+    .toast.show{display:block}
+    /* footer */
+    footer{margin-top:14px;color:#6b7280}
+    footer a{color:#2563eb;text-decoration:none;margin-right:14px}
   </style>
 </head>
 <body>
-  <!-- 语言切换 -->
-  <div class="langbar">
-    <button class="btn btn-ghost" onclick="i18n.set('zh')" data-i18n="lang_cn">CN 中文</button>
-    <button class="btn btn-ghost" onclick="i18n.set('de')" data-i18n="lang_de">DE Deutsch</button>
-    <button class="btn btn-ghost" onclick="i18n.set('en')" data-i18n="lang_en">GB English</button>
-  </div>
+  <div class="wrap">
+    <!-- 语言切换 -->
+    <div class="langbar" id="langbar">
+      <button data-lang="zh" id="btn-zh">CN 中文</button>
+      <button data-lang="de" id="btn-de">DE Deutsch</button>
+      <button data-lang="en" id="btn-en">GB English</button>
+    </div>
 
-  <!-- 标题/副标题均走字典 -->
-  <div class="title" data-i18n="title">云贸星 智能表格生成器</div>
-  <p class="subtitle" data-i18n="subtitle">输入目录型网页链接，秒生成 Excel 产品表格。</p>
+    <!-- 标题与副标题（全部交给 i18n 填充） -->
+    <h1 id="app-title">云贸星 智能表格生成器</h1>
+    <p class="subtitle" id="app-subtitle">输入目录型网页链接，秒生成 Excel 产品表格。</p>
 
-  <div class="card">
+    <!-- 工具栏 -->
     <div class="toolbar">
-      <input id="txtUrl" class="input"
-             data-i18n-ph="input_placeholder"
+      <input id="urlInput" type="text" autocomplete="off"
              placeholder="在此粘贴目录型页面链接（例如某一类目的商品列表页）" />
-      <button id="btnFetch" class="btn btn-primary" data-i18n="btn_fetch">抓取目录</button>
-
-      <select id="selPreview" class="btn" title="Preview size">
-        <option value="50">50</option>
-        <option value="100">100</option>
+      <button id="btnFetch" class="primary"></button>
+      <select id="limit">
+        <option>50</option><option>100</option><option>200</option>
       </select>
-
-      <button id="btnExport" class="btn" data-i18n="btn_export">导出 Excel（.xlsx）</button>
-      <button id="btnClear"  class="btn" data-i18n="btn_clear">清空数据</button>
-      <!-- 已移除：富化价格/MOQ -->
+      <button id="btnExport"></button>
+      <button id="btnClear"></button>
     </div>
 
-    <!-- 顶部提示 -->
-    <div id="toast" class="alert"></div>
+    <!-- 提示 -->
+    <div id="toast" class="toast"></div>
 
-    <!-- 数据区 -->
-    <div class="result-box" id="resultBox">
-      <table id="tbl" style="display:none;">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Item No.</th>
-            <th>Picture</th>
-            <th>Description</th>
-            <th>MOQ</th>
-            <th>Unit Price</th>
-            <th data-i18n="link_text">链接</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
-      <div id="empty" class="muted" data-i18n="no_data">暂无数据</div>
+    <!-- 数据表：ui-enhance.js 依赖这些 ID，请勿改动 -->
+    <div class="panel">
+      <div id="panel-body">
+        <table id="table" aria-label="result" style="width:100%">
+          <thead>
+            <tr>
+              <th class="muted" style="width:48px">#</th>
+              <th id="th-sku" style="width:120px">Item No.</th>
+              <th id="th-pic" style="width:120px">Picture</th>
+              <th id="th-desc">Description</th>
+              <th id="th-moq" style="width:110px">MOQ</th>
+              <th id="th-price" style="width:120px">Unit Price</th>
+              <th id="th-link" style="width:120px"></th>
+            </tr>
+          </thead>
+          <tbody id="rows"><!-- 行由 JS 渲染 --></tbody>
+        </table>
+      </div>
     </div>
+
+    <!-- 页脚 -->
+    <footer>
+      <a id="footer-sites" href="#" target="_blank" rel="noopener">支持的网站</a>
+      <a id="footer-privacy" href="#" target="_blank" rel="noopener">隐私政策</a>
+      <a id="footer-contact" href="#" target="_blank" rel="noopener">联系我们</a>
+    </footer>
   </div>
 
-  <footer>
-    <a href="#" target="_blank" data-i18n="footer_support">支持的网站</a>
-    <a href="#" target="_blank" data-i18n="footer_privacy">隐私政策</a>
-    <a href="#" target="_blank" data-i18n="footer_contact">联系我们</a>
-  </footer>
+  <!-- 脚本（务必与后端静态路径一致） -->
+  <script defer src="/public/i18n.js"></script>
+  <script defer src="/public/ui-enhance.js"></script>
 
-  <!-- 导出（内嵌图片要用到） -->
-  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
-
-  <!-- 页面逻辑 -->
-  <script src="/ui-enhance.js?v=36"></script>
+  <!-- 页面词条键，ui-enhance.js 会读取这些 ID 并调用 i18n.t(key) 设置文案 -->
   <script>
-    // 语言渲染（确保字典可用）
-    if (window.i18n && typeof i18n.apply === 'function') i18n.apply();
-
-    // 安全取词
-    function T(key, vars){
-      const fb = {
-        link_text: '链接',
-        toast_zero: '暂无数据（预览前 {{m}} 条）',
-        toast_success: '抓取成功：共 {{n}} 条（预览前 {{m}} 条）',
-        tip_exporting: '正在生成 Excel…'
-      };
-      try { return (window.i18n && i18n.t) ? i18n.t(key, vars||{}) : (fb[key] || key); }
-      catch { return fb[key] || key; }
-    }
-
-    const $toast = document.getElementById('toast');
-    const $tbl   = document.getElementById('tbl');
-    const $tbody = document.getElementById('tbody');
-    const $empty = document.getElementById('empty');
-
-    function showToast(ok, text){
-      $toast.className = 'alert ' + (ok ? 'alert-ok' : 'alert-warn');
-      $toast.style.display = 'block';
-      $toast.textContent = text;
-    }
-    function hideToast(){ $toast.style.display = 'none'; }
-
-    // 给 ui-enhance.js 用（导出中的进度提示）
-    window.__showToast = showToast;
-    window.__hideToast = hideToast;
-    window.__T = T;
-
-    // 渲染数据
-    window.renderRows = function(rows){
-      try{
-        $tbody.innerHTML = '';
-        const m = (document.getElementById('selPreview') || {}).value || 50;
-
-        if (!rows || !rows.length){
-          $tbl.style.display  = 'none';
-          $empty.style.display= 'block';
-          showToast(true, T('toast_zero', { m }));
-          return;
-        }
-
-        rows.forEach((r, i) => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>${i+1}</td>
-            <td>${r.sku || ''}</td>
-            <td>${r.img ? `<img src="${r.img}" style="height:36px">` : ''}</td>
-            <td>${r.title || ''}</td>
-            <td>${r.moq ?? ''}</td>
-            <td>${r.price ?? ''}</td>
-            <td>${r.url ? `<a href="${r.url}" target="_blank">${T('link_text')}</a>` : ''}</td>
-          `;
-          $tbody.appendChild(tr);
-        });
-
-        $empty.style.display = 'none';
-        $tbl.style.display   = 'table';
-        showToast(true, T('toast_success', { n: rows.length, m }));
-      }catch(e){
-        console.error('[renderRows error]', e);
-        $tbl.style.display = 'none';
-        $empty.style.display= 'block';
-        showToast(false, e.message || 'Render error');
-      }
+    // 这些 key 必须与 /public/i18n.js 中字典一致
+    window.__I18N_BINDINGS__ = {
+      title: 'app.title',                // 云贸星 智能表格生成器 / Yunivera DataBridge
+      subtitle: 'app.subtitle',          // 副标题
+      inputPlaceholder: 'app.input.placeholder',
+      btnFetch: 'app.btn.fetch',
+      btnExport: 'app.btn.export',
+      btnClear: 'app.btn.clear',
+      thSku: 'table.col.sku',
+      thPic: 'table.col.pic',
+      thDesc: 'table.col.desc',
+      thMoq: 'table.col.moq',
+      thPrice: 'table.col.price',
+      thLink: 'table.col.link',
+      footerSites: 'app.footer.sites',
+      footerPrivacy: 'app.footer.privacy',
+      footerContact: 'app.footer.contact'
     };
 
-    // 清空
-    document.getElementById('btnClear').addEventListener('click', () => {
-      $tbody.innerHTML = '';
-      $tbl.style.display = 'none';
-      $empty.style.display = 'block';
-      hideToast();
-    });
+    // 把元素引用暴露给 ui 脚本（避免 querySelector 失败）
+    window.__UI_ANCHORS__ = {
+      urlInput: document.getElementById('urlInput'),
+      btnFetch: document.getElementById('btnFetch'),
+      btnExport: document.getElementById('btnExport'),
+      btnClear: document.getElementById('btnClear'),
+      limit: document.getElementById('limit'),
+      toast: document.getElementById('toast'),
+      rows: document.getElementById('rows'),
+      appTitle: document.getElementById('app-title'),
+      appSubtitle: document.getElementById('app-subtitle'),
+      thSku: document.getElementById('th-sku'),
+      thPic: document.getElementById('th-pic'),
+      thDesc: document.getElementById('th-desc'),
+      thMoq: document.getElementById('th-moq'),
+      thPrice: document.getElementById('th-price'),
+      thLink: document.getElementById('th-link'),
+      footerSites: document.getElementById('footer-sites'),
+      footerPrivacy: document.getElementById('footer-privacy'),
+      footerContact: document.getElementById('footer-contact')
+    };
   </script>
 </body>
 </html>
