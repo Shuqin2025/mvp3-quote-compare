@@ -1,7 +1,7 @@
 <script>
 window.__DICT__ = {
   zh: {
-    title: "Yunivera DataBridge",
+    title: "云贸星 智能表格生成器",
     subtitle: "输入目录型网页链接，秒生成 Excel 产品表格。",
     lang_cn: "CN 中文",
     lang_de: "DE Deutsch",
@@ -79,7 +79,6 @@ window.i18n = (function () {
       const key = el.getAttribute("data-i18n");
       el.textContent = t(key);
     });
-    // placeholder
     document.querySelectorAll("[data-i18n-ph]").forEach(el => {
       const key = el.getAttribute("data-i18n-ph");
       el.setAttribute("placeholder", t(key));
