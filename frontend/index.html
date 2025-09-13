@@ -138,7 +138,7 @@
     window.__hideToast = hideToast;
     window.__T = T;
 
-    // 更稳健的渲染函数
+    // 更稳健的渲染函数（不再残留“暂无数据”）
     window.renderRows = function(rows){
       try{
         $tbody.innerHTML = '';
@@ -168,6 +168,7 @@
         $empty.style.display = 'none';
         $tbl.style.display   = 'table';
         showToast(true, T('toast_success', { n: rows.length, m }));
+
       }catch(e){
         console.error('[renderRows error]', e);
         $tbl.style.display = 'none';
@@ -175,7 +176,7 @@
       }
     };
 
-    // 清空
+    // 清空数据
     document.getElementById('btnClear').addEventListener('click', () => {
       $tbody.innerHTML = '';
       $tbl.style.display = 'none';
