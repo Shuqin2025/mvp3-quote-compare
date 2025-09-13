@@ -30,8 +30,10 @@
     .alert{padding:10px 12px;border-radius:10px;margin:8px 0}
     .alert-ok{background:var(--okbg);border:1px solid var(--okbd)}
     .alert-warn{background:var(--warnbg);border:1px solid var(--warnbd)}
-    .result-box{min-height:420px;background:repeating-linear-gradient(45deg,#f7f7f7 0,#f7f7f7 10px,#f0f0f0 10px,#f0f0f0 20px);
-      border:1px dashed #ddd;border-radius:12px;padding:10px}
+    .result-box{
+      min-height:420px;               /* 空白容器，不再使用斜纹背景 */
+      border:1px dashed #ddd;border-radius:12px;padding:10px;background:#fff;
+    }
     table{width:100%;border-collapse:collapse;background:#fff}
     thead th{background:#fafafa}
     th,td{border-bottom:1px solid #eee;padding:8px;vertical-align:top}
@@ -42,6 +44,7 @@
     footer a:hover{text-decoration:underline}
   </style>
 </head>
+
 <body>
   <!-- 语言切换 -->
   <div class="langbar">
@@ -89,7 +92,8 @@
         </thead>
         <tbody id="tbody"></tbody>
       </table>
-      <div id="empty" class="muted" data-i18n="no_data">暂无数据</div>
+      <!-- 空白占位，不再显示“暂无数据”字样 -->
+      <div id="empty" class="muted" style="display:block;"></div>
     </div>
   </div>
 
@@ -99,16 +103,16 @@
     <a href="#" target="_blank" data-i18n="footer_contact">联系我们</a>
   </footer>
 
-  <!-- 必须先引入 ExcelJS / FileSaver（用于内嵌图片） -->
+  <!-- Excel 导出（内嵌图片需要） -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
   <script src="/ui-enhance.js?v=36"></script>
 
   <script>
-    // 应用多语言
-    i18n.apply();
+    // i18n 安全应用（防止 i18n 尚未就绪时报错）
+    try { if (window.i18n && i18n.apply) i18n.apply(); } catch(e) {}
 
-    // 安全取词：i18n 缺失时也有中文兜底
+    // 文案兜底
     function T(key, vars){
       const fb = {
         link_text: '链接',
@@ -137,15 +141,16 @@
     window.__hideToast = hideToast;
     window.__T = T;
 
-    // 更稳健的渲染函数（不再残留“暂无数据”）
+    // 更稳健的渲染（防止 selPreview 为空导致报错）
     window.renderRows = function(rows){
       try{
         $tbody.innerHTML = '';
-        const m = document.getElementById('selPreview').value || 50;
+        const sel = document.getElementById('selPreview');
+        const m = (sel && sel.value) ? sel.value : 50;
 
         if (!rows || !rows.length){
-          $tbl.style.display  = 'none';
-          $empty.style.display= 'block';
+          $tbl.style.display   = 'none';
+          $empty.style.display = 'block';
           showToast(true, T('toast_zero', { m }));
           return;
         }
@@ -167,18 +172,17 @@
         $empty.style.display = 'none';
         $tbl.style.display   = 'table';
         showToast(true, T('toast_success', { n: rows.length, m }));
-
       }catch(e){
         console.error('[renderRows error]', e);
-        $tbl.style.display = 'none';
-        $empty.style.display= 'block';
+        $tbl.style.display   = 'none';
+        $empty.style.display = 'block';
       }
     };
 
     // 清空数据
     document.getElementById('btnClear').addEventListener('click', () => {
       $tbody.innerHTML = '';
-      $tbl.style.display = 'none';
+      $tbl.style.display   = 'none';
       $empty.style.display = 'block';
       hideToast();
       // document.getElementById('txtUrl').value = '';
