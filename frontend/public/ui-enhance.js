@@ -20,7 +20,7 @@ const T = (key, vars = {}) => {
   return txt;
 };
 
-/* ui-enhance.js — MVP3 前端逻辑（抓取 + 富化 + 导出内嵌图） */
+/* ui-enhance.js — MVP3 前端逻辑（抓取 + 导出内嵌图） */
 (function () {
   const $url = document.getElementById('txtUrl');
   const $btnFetch = document.getElementById('btnFetch');
@@ -29,7 +29,9 @@ const T = (key, vars = {}) => {
   const $selPreview = document.getElementById('selPreview');
   const $toast = document.getElementById('toast');
 
-  // ... 保持前面的 fetch / normalizeItems / ab2b64 / fetchProxyImageAsBase64 等函数不变 ...
+  // ……这里保留你现有的 handleFetch、normalizeItems、fetchProxyImageAsBase64 等函数……
+  // 注意：如果代码里还有 `document.getElementById('chkEnrich').checked`，请替换为：
+  // const enrichEl = document.getElementById('chkEnrich'); const enrich = !!(enrichEl && enrichEl.checked);
 
   async function exportExcelWithImages(rows) {
     if (!rows || !rows.length) {
@@ -37,7 +39,7 @@ const T = (key, vars = {}) => {
       return;
     }
 
-    // ✅ 开始导出前提示
+    // ✅ 导出开始提示
     if (window.__showToast) {
       window.__showToast(true, T('export_generating'));
     } else {
@@ -64,6 +66,7 @@ const T = (key, vars = {}) => {
           r.url ? { text: T('link_text'), hyperlink: r.url } : ''
         ]);
         excelRow.height = 52;
+
         if (r.img) {
           try {
             const b64 = await fetchProxyImageAsBase64(r.img);
@@ -87,7 +90,8 @@ const T = (key, vars = {}) => {
 
       const buf = await wb.xlsx.writeBuffer();
       saveAs(new Blob([buf]), `yunivera-${Date.now()}.xlsx`);
-      // ✅ 导出成功后提示
+
+      // ✅ 导出成功提示
       if (window.__showToast) {
         window.__showToast(true, T('export_done'));
         setTimeout(() => window.__hideToast && window.__hideToast(), 1500);
@@ -118,6 +122,5 @@ const T = (key, vars = {}) => {
   if ($btnFetch) $btnFetch.addEventListener('click', handleFetch);
   if ($btnExport) $btnExport.addEventListener('click', handleExport);
   if ($btnClear) $btnClear.addEventListener('click', handleClear);
-
   if ($url) $url.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleFetch(); });
 })();
