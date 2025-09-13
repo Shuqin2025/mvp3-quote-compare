@@ -1,16 +1,13 @@
 // ---------- helpers ----------
+
 const API_BASE = (function () {
   try {
     const sp = new URL(location.href).searchParams;
     let p = (sp.get("api") || "").trim();
     if (!p) return "/v1/api";
-    // 去尾部斜杠
     p = p.replace(/\/+$/, "");
-    // 如果传的是 __version，回到 /v1/api
     if (/\/v1\/api\/__version$/.test(p)) return p.replace(/\/__version$/, "");
-    // 如果本身以 /v1/api 结尾，直接用
     if (/\/v1\/api$/.test(p)) return p;
-    // 若只是域名/服务根，补上 /v1/api
     return p + "/v1/api";
   } catch {
     return "/v1/api";
@@ -73,20 +70,14 @@ function normalizeItems(data) {
 // ---------- fallback renderer ----------
 function renderRowsFallback(rows) {
   if (!$tbody || !$tbl || !$empty) return;
-
-  // 清空
   $tbody.innerHTML = "";
-
   if (!rows || !rows.length) {
     $tbl.style.display = 'none';
     $empty.style.display = 'block';
     return;
   }
-
-  // 显示表格
   $empty.style.display = 'none';
   $tbl.style.display = 'table';
-
   rows.forEach((r, i) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -110,33 +101,22 @@ async function handleFetch() {
     return;
   }
   const previewN = parseInt($selPreview?.value || '50', 10);
-
   try {
     showToast(true, T('fetch_loading') || 'Loading…');
     const resp = await fetch(`${API_BASE}/catalog/parse?url=${encodeURIComponent(u)}`);
     if (!resp.ok) {
-      // 例如 404 时，直接把文本扔给错误提示
       const txt = await resp.text();
       throw new Error(`${resp.status} ${resp.statusText} — ${txt.replace(/\s+/g,' ').slice(0,160)}`);
     }
     const json = await resp.json();
     const items = normalizeItems(json);
-
     __rows = items.slice(0, previewN);
-
-    // 若页面提供了自定义渲染器，就走它；否则走内建回退渲染器
-    if (typeof window.renderRows === 'function') {
-      window.renderRows(__rows);
-    } else {
-      renderRowsFallback(__rows);
-    }
-
-    // 绿色提示交给页面顶上那块（如果已经有）；这里不重复
+    if (typeof window.renderRows === 'function') window.renderRows(__rows);
+    else renderRowsFallback(__rows);
     hideToast();
   } catch (err) {
     console.error('[fetch:fail]', err);
     showToast(false, `${T('fetch_fail') || '抓取失败'}: ${err.message || err}`);
-    // 抓取失败也切换到“暂无数据”
     renderRowsFallback([]);
   }
 }
@@ -145,7 +125,7 @@ async function handleFetch() {
 async function fetchProxyImageAsBase64(imgUrl) {
   const r = await fetch(`${API_BASE}/image?url=${encodeURIComponent(imgUrl)}`);
   if (!r.ok) throw new Error(`image ${r.status}`);
-  const { base64 } = await r.json(); // 后端返回 { base64:"..." }
+  const { base64 } = await r.json();
   return base64;
 }
 
@@ -156,7 +136,6 @@ async function exportExcelWithImages(rows) {
     return;
   }
   showToast(true, T('export_generating') || '正在生成 Excel…');
-
   try {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Items');
@@ -171,7 +150,6 @@ async function exportExcelWithImages(rows) {
         r.url ? { text: (T('link_text')||'链接'), hyperlink:r.url } : ''
       ]);
       row.height = 52;
-
       if (r.img) {
         try {
           const b64 = await fetchProxyImageAsBase64(r.img);
@@ -187,7 +165,6 @@ async function exportExcelWithImages(rows) {
         } catch(e) { /* 单图失败忽略 */ }
       }
     }
-
     const buf = await wb.xlsx.writeBuffer();
     saveAs(new Blob([buf]), `yunivera-${Date.now()}.xlsx`);
     showToast(true, T('export_done') || 'Excel 已导出');
