@@ -32,12 +32,45 @@
   let __rows = []; // 最近一次拉到的“全量”数据（未截取）
   let __apiBase = null;
 
-  // ---------- 工具 ----------
+  // ---------- 修复后的 API 基址解析 ----------
   function getApiBase() {
     if (__apiBase) return __apiBase;
-    const u = new URL(location.href);
-    const api = u.searchParams.get('api') || '';
-    __apiBase = api.replace(/\/+$/, ''); // 去掉末尾斜杠
+
+    const cur = new URL(location.href);
+    let api = (cur.searchParams.get("api") || "").trim();
+
+    // 1) 页面未带 ?api= 参数，默认同源 /v1/api
+    if (!api) {
+      __apiBase = `${location.origin}/v1/api`;
+      return __apiBase;
+    }
+
+    // 2) 去掉收尾多余的斜杠
+    api = api.replace(/\/+$/, "");
+
+    // 3) 去掉错误尾巴 /__version
+    api = api.replace(/\/__version$/i, "");
+
+    // 4) 规范化为“…/v1/api”
+    try {
+      const u = new URL(api);
+      if (/\/v1\/api(\/.*)?$/i.test(u.pathname)) {
+        // 已包含 /v1/api，则截到 /v1/api
+        const match = u.pathname.match(/^(.*?\/v1\/api)/i);
+        api = u.origin + (match ? match[1] : "/v1/api");
+      } else {
+        // 补上 /v1/api
+        api = (api.replace(/\/+$/, "")) + "/v1/api";
+      }
+    } catch {
+      // 相对路径情况
+      api = location.origin + "/" + api.replace(/^\/+/, "");
+      if (!/\/v1\/api(\/.*)?$/i.test(new URL(api).pathname)) {
+        api = api.replace(/\/+$/, "") + "/v1/api";
+      }
+    }
+
+    __apiBase = api.replace(/\/+$/, "");
     return __apiBase;
   }
 
@@ -76,7 +109,8 @@
     if (!imgUrl) return null;
     try {
       const api = getApiBase();
-      const resp = await fetch(`${api}/v1/api/image?url=${encodeURIComponent(imgUrl)}`);
+      // 注意：getApiBase 已返回以 /v1/api 结尾的基址，这里不要再拼 /v1/api
+      const resp = await fetch(`${api}/image?url=${encodeURIComponent(imgUrl)}`);
       if (!resp.ok) return null;
       const buf = await resp.arrayBuffer();
       return ab2b64(buf);
@@ -168,7 +202,8 @@
       }).toString();
 
       const t0 = Date.now();
-      const resp = await fetch(`${api}/v1/api/catalog/parse?${qs}`);
+      // 注意：基址已是 /v1/api，避免重复拼接
+      const resp = await fetch(`${api}/catalog/parse?${qs}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json();
 
@@ -194,7 +229,6 @@
   // ---------- 导出 ----------
   async function handleExport() {
     try {
-      // 没有抓到就不用导
       if (!__rows || !__rows.length) {
         showToast(false, '暂无数据可导出');
         return;
@@ -227,4 +261,3 @@
     $url.setAttribute('placeholder', i18n.t('input_placeholder'));
   }
 })();
-
