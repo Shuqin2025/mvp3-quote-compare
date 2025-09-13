@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>Yunivera DataBridge</title>
 
-  <!-- 你已有的样式 -->
+  <!-- 样式 -->
   <link rel="stylesheet" href="/ui-enhance.css?v=36" />
 
-  <!-- 三语言字典（你已更新的 public/i18n.js） -->
+  <!-- 三语言字典 -->
   <script src="/i18n.js?v=1"></script>
 
   <style>
@@ -54,7 +54,7 @@
     <button class="btn btn-ghost" onclick="i18n.set('en')" data-i18n="lang_en">GB English</button>
   </div>
 
-  <!-- 品牌标题与副标题（随语言切换） -->
+  <!-- 标题 & 副标题（随语言切换） -->
   <div class="title" data-i18n="title">Yunivera DataBridge</div>
   <p class="subtitle" data-i18n="subtitle">输入目录型网页链接，秒生成 Excel 产品表格。</p>
 
@@ -65,15 +65,17 @@
              data-i18n-ph="input_placeholder"
              placeholder="在此粘贴目录型页面链接（例如某一类目的商品列表页）" />
       <button id="btnFetch" class="btn btn-primary" data-i18n="btn_fetch">抓取目录</button>
+
       <select id="selPreview" class="btn" title="Preview size">
         <option value="50">50</option>
         <option value="100">100</option>
       </select>
+
       <button id="btnExport" class="btn" data-i18n="btn_export">导出 Excel（.xlsx）</button>
       <button id="btnClear" class="btn" data-i18n="btn_clear">清空数据</button>
     </div>
 
-    <!-- 状态提示（与表格分离） -->
+    <!-- 状态提示 -->
     <div id="toast" class="alert alert-ok" style="display:none;"></div>
 
     <!-- 数据表区域 -->
@@ -103,16 +105,15 @@
     <a href="#" target="_blank" data-i18n="footer_contact">联系我们</a>
   </footer>
 
-  <!-- 你原有的脚本（顺序保持不变） -->
-  <script src="/exceljs.min.js"></script>
-  <script src="/FileSaver.min.js"></script>
+  <!-- 必须：先引入 ExcelJS 与 FileSaver（CDN），再引入业务脚本 -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
   <script src="/ui-enhance.js?v=36"></script>
 
   <script>
-    // 初始化应用字典
+    // 应用多语言文本
     i18n.apply();
 
-    // 简单的提示/渲染帮助函数（与你的 ui-enhance.js 对接）
     const $toast = document.getElementById('toast');
     const $tbl   = document.getElementById('tbl');
     const $tbody = document.getElementById('tbody');
@@ -125,8 +126,7 @@
     }
     function hideToast(){ $toast.style.display = 'none'; }
 
-    // 暴露给 ui-enhance.js：抓取成功后调用
-    // rows: [{sku,title,img,moq,price,url}, ...]
+    // 提供给 ui-enhance.js 调用的渲染函数
     window.renderRows = function(rows){
       $tbody.innerHTML = '';
       const m = document.getElementById('selPreview').value;
@@ -145,8 +145,8 @@
           <td>${r.sku || ''}</td>
           <td>${r.img ? `<img src="${r.img}" style="height:36px">` : ''}</td>
           <td>${r.title || ''}</td>
-          <td>${r.moq || ''}</td>
-          <td>${r.price || ''}</td>
+          <td>${r.moq ?? ''}</td>
+          <td>${r.price ?? ''}</td>
           <td>${r.url ? `<a href="${r.url}" target="_blank">${i18n.t('link_text')}</a>` : ''}</td>
         `;
         $tbody.appendChild(tr);
@@ -163,7 +163,7 @@
       $tbl.style.display = 'none';
       $empty.style.display = 'block';
       hideToast();
-      // 可选：清空输入框
+      // 可选：清空输入
       // document.getElementById('txtUrl').value = '';
     });
   </script>
