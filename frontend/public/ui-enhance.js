@@ -1,203 +1,184 @@
-// ---------- helpers ----------
+/* Yunivera DataBridge – UI helpers (browser) */
+(() => {
+  // 幂等保护：防止脚本被多次注入后重复绑定事件
+  if (window.__udb_inited) return;
+  window.__udb_inited = true;
 
-const API_BASE = (function () {
-  try {
-    const sp = new URL(location.href).searchParams;
-    let p = (sp.get("api") || "").trim();
-    if (!p) return "/v1/api";
-    p = p.replace(/\/+$/, "");
-    if (/\/v1\/api\/__version$/.test(p)) return p.replace(/\/__version$/, "");
-    if (/\/v1\/api$/.test(p)) return p;
-    return p + "/v1/api";
-  } catch {
-    return "/v1/api";
-  }
-})();
+  // -------- i18n 简便封装 --------
+  const T = (k, params) => {
+    try {
+      return (window.i18n && window.i18n.t) ? window.i18n.t(k, params) : k;
+    } catch { return k; }
+  };
 
-const __toastEl = document.getElementById('toast');
-function showToast(ok, text) {
-  if (window.__showToast) return window.__showToast(ok, text);
-  if (!__toastEl) return;
-  __toastEl.className = 'alert ' + (ok ? 'alert-ok' : 'alert-warn');
-  __toastEl.style.display = 'block';
-  __toastEl.textContent = text;
-}
-function hideToast() {
-  if (window.__hideToast) return window.__hideToast();
-  if (!__toastEl) return;
-  __toastEl.style.display = 'none';
-}
+  // -------- DOM --------
+  const $txtUrl   = document.getElementById('txtUrl');
+  const $btnFetch = document.getElementById('btnFetch');
+  const $btnExport= document.getElementById('btnExport');
+  const $btnClear = document.getElementById('btnClear');
+  const $selLimit = document.getElementById('selLimit');
+  const $tbl      = document.getElementById('tbl');            // 表格
+  const $tbody    = document.getElementById('tbody');          // 表体
+  const $empty    = document.getElementById('empty');          // 空白占位
+  const $preview  = document.getElementById('selPreview');     // API 基址显示用（隐藏 input）
+  const API_BASE  = (document.currentScript?.dataset?.api) || new URLSearchParams(location.search).get('api') || '';
 
-const T = (k, v) => (window.__T ? window.__T(k, v) : k);
+  // 成功/失败提示
+  let toastTimer = null;
+  const showToast = (ok, msg) => {
+    const el = document.getElementById('toast');
+    el.textContent = msg || '';
+    el.className = `toast ${ ok ? 'toast-ok' : 'toast-warn' }`;
+    el.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.style.display = 'none'; }, 2800);
+  };
 
-// ---------- DOM ----------
-const $url        = document.getElementById('txtUrl');
-const $btnFetch   = document.getElementById('btnFetch');
-const $btnExport  = document.getElementById('btnExport');
-const $btnClear   = document.getElementById('btnClear');
-const $selPreview = document.getElementById('selPreview');
+  // 渲染表格
+  const renderRows = (rows) => {
+    $tbody.innerHTML = '';
+    if (!rows || !rows.length) {
+      $tbl.style.display = 'none';
+      $empty.style.display = 'block';     // 空白占位
+      return;
+    }
+    rows.forEach((r, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${i+1}</td>
+        <td>${r.sku || ''}</td>
+        <td><img src="${r.img || ''}" style="height:36px" onerror="this.style.opacity=0.2"/></td>
+        <td>${r.title || ''}</td>
+        <td>${r.moq   || ''}</td>
+        <td>${r.price || ''}</td>
+        <td><a href="${r.url || '#'}" target="_blank">${T('link_text') || 'link_text'}</a></td>
+      `;
+      $tbody.appendChild(tr);
+    });
+    $empty.style.display = 'none';
+    $tbl.style.display = 'table';
+  };
 
-// UI 容器
-const $tbl   = document.getElementById('tbl');
-const $tbody = document.getElementById('tbody');
-const $empty = document.getElementById('empty');
+  // 拉取目录
+  const handleFetch = async () => {
+    const url = ($txtUrl.value || '').trim();
+    if (!url) { showToast(false, T('toast_need_url') || '请输入链接'); return; }
+    try {
+      const api = (API_BASE || '').replace(/\/?$/, '');
+      const u = `${api}/v1/api/catalog/parse?url=${encodeURIComponent(url)}`;
+      const t0 = Date.now();
+      const res = await fetch(u);
+      if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+      const data = await res.json();
+      // 兼容旧后端字段名 {ok,count,products/items}
+      const rows = data.products || data.items || [];
+      const n = data.count ?? rows.length ?? 0;
+      renderRows(rows.slice(0, Number($selLimit.value || 50)));
+      showToast(true, (T('toast_success') || '抓取成功：共 {n} 条').replace('{n}', n));
+    } catch (err) {
+      showToast(false, `${T('toast_fail') || '抓取失败'}: ${err.message || err}`);
+      console.error(err);
+    }
+  };
 
-// 隐藏“富化价格/MOQ”
-(function hideEnrich() {
-  const c = document.getElementById('chkEnrich');
-  if (c && c.closest('label')) c.closest('label').style.display = 'none';
-})();
+  // 导出 Excel（内嵌真实图片）
+  const handleExport = async () => {
+    try {
+      const rows = [...$tbody.querySelectorAll('tr')];
+      if (!rows.length) { showToast(false, T('toast_zero') || '暂无数据'); return; }
 
-let __rows = []; // 缓存当前预览行
+      if (!window.ExcelJS) throw new Error('ExcelJS not loaded');
+      const api = (API_BASE || '').replace(/\/?$/, '');
 
-// ---------- normalize ----------
-function normalizeItems(data) {
-  let arr = [];
-  if (Array.isArray(data)) arr = data;
-  else if (Array.isArray(data.products)) arr = data.products;
-  else if (Array.isArray(data.items)) arr = data.items;
+      showToast(true, T('toast_exporting') || '正在生成 Excel…');
 
-  return arr.map(p => ({
-    sku:   p.sku || p.itemNo || p.article || "",
-    title: p.title || p.name || "",
-    url:   p.url || p.link || "",
-    img:   p.img || p.image || "",
-    price: (p.price ?? p.unitPrice ?? ""),
-    moq:   (p.moq ?? p.minQty ?? "")
-  }));
-}
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Items');
 
-// ---------- fallback renderer ----------
-function renderRowsFallback(rows) {
-  if (!$tbody || !$tbl || !$empty) return;
-  $tbody.innerHTML = "";
-  if (!rows || !rows.length) {
+      // 表头
+      ws.columns = [
+        { header: '#',        key: '_',     width: 4  },
+        { header: T('col_sku')   || 'Item No.', key: 'sku',  width: 12 },
+        { header: T('col_pic')   || 'Picture',  key: 'pic',  width: 14 },
+        { header: T('col_desc')  || 'Description', key:'title', width: 80 },
+        { header: 'MOQ', key:'moq', width: 10 },
+        { header: T('col_price') || 'Unit Price', key:'price', width: 12 },
+        { header: T('col_link')  || 'Link', key:'link', width: 16 },
+      ];
+
+      const data = [];
+      // 收集数据（从当前表格）
+      $tbody.querySelectorAll('tr').forEach((tr) => {
+        const tds = tr.querySelectorAll('td');
+        data.push({
+          idx:   tds[0]?.textContent.trim(),
+          sku:   tds[1]?.textContent.trim(),
+          img:   tr.querySelector('img')?.getAttribute('src') || '',
+          title: tds[3]?.textContent.trim(),
+          moq:   tds[4]?.textContent.trim(),
+          price: tds[5]?.textContent.trim(),
+          url:   tr.querySelector('a')?.getAttribute('href') || ''
+        });
+      });
+
+      const picCol = 3; // 列 B=2, C=3 ...
+      let r = 2;        // 从第2行开始写数据
+      for (const item of data) {
+        ws.addRow([item.idx, item.sku, '', item.title, item.moq, item.price, (T('link_text')||'link_text')]).commit?.();
+        ws.getCell(r, 7).value = { text: (T('link_text')||'link_text'), hyperlink: item.url || '' };
+
+        // 图片（通过后端代理拿二进制）
+        if (item.img) {
+          try {
+            const imRes = await fetch(`${api}/v1/api/image?url=${encodeURIComponent(item.img)}`);
+            if (imRes.ok) {
+              const ct = imRes.headers.get('content-type') || '';
+              const ext = /png/.test(ct) ? 'png' : 'jpeg';
+              const buf = await imRes.arrayBuffer();
+              const imgId = wb.addImage({ buffer: buf, extension: ext });
+              ws.getRow(r).height = 56;                   // 行高
+              ws.addImage(imgId, `C${r}:C${r}`);          // C 列单元格内嵌
+            }
+          } catch (e) { /* 单图失败不影响整体 */ }
+        }
+        r++;
+      }
+
+      const ab = await wb.xlsx.writeBuffer();
+      const blob = new Blob([ab], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `yunivera-${Date.now()}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      showToast(false, `${T('toast_export_fail') || '导出失败'}：${err.message || err}`);
+      console.error(err);
+    }
+  };
+
+  // 清空
+  const handleClear = () => {
+    $tbody.innerHTML = '';
     $tbl.style.display = 'none';
     $empty.style.display = 'block';
-    return;
-  }
-  $empty.style.display = 'none';
-  $tbl.style.display = 'table';
-  rows.forEach((r, i) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${i + 1}</td>
-      <td>${r.sku || ''}</td>
-      <td>${r.img ? `<img src="${r.img}" style="height:36px">` : ''}</td>
-      <td>${r.title || ''}</td>
-      <td>${r.moq || ''}</td>
-      <td>${r.price || ''}</td>
-      <td>${r.url ? `<a href="${r.url}" target="_blank">${T('link_text') || '链接'}</a>` : ''}</td>
-    `;
-    $tbody.appendChild(tr);
+  };
+
+  // 事件绑定
+  $btnFetch?.addEventListener('click', handleFetch);
+  $btnExport?.addEventListener('click', handleExport);
+  $btnClear?.addEventListener('click', handleClear);
+
+  // 回车键抓取
+  $txtUrl?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleFetch();
   });
-}
 
-// ---------- fetch catalog ----------
-async function handleFetch() {
-  const u = ($url.value || '').trim();
-  if (!u) {
-    showToast(false, T('toast_need_url') || '请输入链接');
-    return;
-  }
-  const previewN = parseInt($selPreview?.value || '50', 10);
-  try {
-    showToast(true, T('fetch_loading') || 'Loading…');
-    const resp = await fetch(`${API_BASE}/catalog/parse?url=${encodeURIComponent(u)}`);
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`${resp.status} ${resp.statusText} — ${txt.replace(/\s+/g,' ').slice(0,160)}`);
-    }
-    const json = await resp.json();
-    const items = normalizeItems(json);
-    __rows = items.slice(0, previewN);
-    if (typeof window.renderRows === 'function') window.renderRows(__rows);
-    else renderRowsFallback(__rows);
-    hideToast();
-  } catch (err) {
-    console.error('[fetch:fail]', err);
-    showToast(false, `${T('fetch_fail') || '抓取失败'}: ${err.message || err}`);
-    renderRowsFallback([]);
-  }
-}
+  // 首次进入显示 API 基址（隐藏域）
+  if ($preview) $preview.value = (API_BASE || '');
 
-// ---------- image proxy (for Excel embedding) ----------
-async function fetchProxyImageAsBase64(imgUrl) {
-  const r = await fetch(`${API_BASE}/image?url=${encodeURIComponent(imgUrl)}`);
-  if (!r.ok) throw new Error(`image ${r.status}`);
-  const { base64 } = await r.json();
-  return base64;
-}
-
-// ---------- export ----------
-async function exportExcelWithImages(rows) {
-  if (!rows || !rows.length) {
-    showToast(false, T('export_fail_nodata') || '导出失败：无数据');
-    return;
-  }
-  showToast(true, T('export_generating') || '正在生成 Excel…');
-  try {
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Items');
-    ws.addRow(['#','Item No.','Picture','Description','MOQ','Unit Price', T('link_text') || '链接']);
-    ws.getColumn(1).width=5;  ws.getColumn(2).width=14; ws.getColumn(3).width=14;
-    ws.getColumn(4).width=60; ws.getColumn(5).width=10; ws.getColumn(6).width=14; ws.getColumn(7).width=30;
-
-    for (let i=0; i<rows.length; i++) {
-      const r = rows[i];
-      const row = ws.addRow([
-        i+1, r.sku||'', '', r.title||'', r.moq||'', r.price||'',
-        r.url ? { text: (T('link_text')||'链接'), hyperlink:r.url } : ''
-      ]);
-      row.height = 52;
-      if (r.img) {
-        try {
-          const b64 = await fetchProxyImageAsBase64(r.img);
-          if (b64) {
-            const ext = (r.img.split('.').pop()||'jpg').toLowerCase();
-            const usePng = ext.includes('png');
-            const imgId = wb.addImage({
-              base64: `data:${usePng?'image/png':'image/jpeg'};base64,${b64}`,
-              extension: usePng ? 'png' : 'jpeg'
-            });
-            ws.addImage(imgId, { tl:{ col:2, row: row.number-1 }, ext:{ width:90, height:50 } });
-          }
-        } catch(e) { /* 单图失败忽略 */ }
-      }
-    }
-    const buf = await wb.xlsx.writeBuffer();
-    saveAs(new Blob([buf]), `yunivera-${Date.now()}.xlsx`);
-    showToast(true, T('export_done') || 'Excel 已导出');
-    setTimeout(hideToast, 1200);
-  } catch (err) {
-    console.error('[export:fail]', err);
-    showToast(false, `${T('export_fail')||'导出失败'}：${err.message||err}`);
-  }
-}
-
-async function handleExport() {
-  if (!__rows || !__rows.length) {
-    showToast(false, T('toast_zero', { m: 0 }) || '暂无数据');
-    return;
-  }
-  await exportExcelWithImages(__rows);
-}
-
-function handleClear() {
-  __rows = [];
-  renderRowsFallback([]);
-  hideToast();
-}
-
-// ---------- bind ----------
-$btnFetch   && $btnFetch.addEventListener('click', handleFetch);
-$btnExport  && $btnExport.addEventListener('click', handleExport);
-$btnClear   && $btnClear.addEventListener('click', handleClear);
-$url        && $url.addEventListener('keydown', e => { if (e.key === 'Enter') handleFetch(); });
-$selPreview && $selPreview.addEventListener('change', () => {
-  if (!__rows?.length) return;
-  const n = parseInt($selPreview.value || '50', 10);
-  const part = __rows.slice(0, n);
-  if (typeof window.renderRows === 'function') window.renderRows(part);
-  else renderRowsFallback(part);
-});
+  // 语言切换通知（可选）
+  window.addEventListener('langchange', () => {
+    document.getElementById('appTitle').textContent = T('app_title');
+  });
+})();
