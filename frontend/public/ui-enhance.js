@@ -1,4 +1,5 @@
 /* public/ui-enhance.js —— 纯 JS 文件，勿放 <script> 标签 */
+
 (() => {
   // ===== 小工具 =====
   const $  = (sel, ctx = document) => ctx.querySelector(sel);
@@ -149,8 +150,7 @@
       let targetUrl = inputVal;
       try {
         const parsed = new URL(inputVal);
-        // 像 “…/parse?url=https%3A%2F%2Fxxx” 的情况
-        const u2 = parsed.searchParams.get('url');
+        const u2 = parsed.searchParams.get('url'); // “…?url=https%3A%2F%2Fxxx”
         if (u2) targetUrl = decodeURIComponent(u2);
       } catch { /* 不是 URL 对象也没关系 */ }
 
@@ -163,7 +163,8 @@
       const limit = parseInt((els.pageSize && els.pageSize.value) || '50', 10) || 50;
 
       toast('ok', '正在抓取中…');
-      const res = await fetch(`${api}/v1/api/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}`);
+      // 统一到新的后端路径：/v1/api/catalog/parse
+      const res = await fetch(`${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}`);
       if (!res.ok) {
         toast('fail', `抓取失败：HTTP ${res.status}`);
         render([]);
