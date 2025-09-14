@@ -1,10 +1,10 @@
-/* public/ui-enhance.js —— 挂接到现有 UI，不再自建标题/占位块 */
+/* public/ui-enhance.js —— 直接覆盖即可。挂接到你现有的 UI，不改变页面结构与样式。 */
 
 (() => {
-  // --------- 工具 ---------
+  // ---------- 小工具 ----------
   const $  = (s, ctx=document) => ctx.querySelector(s);
   const $$ = (s, ctx=document) => Array.from(ctx.querySelectorAll(s));
-  const el = (tag, attrs={}) => { const n=document.createElement(tag); for(const[k,v] of Object.entries(attrs)) n.setAttribute(k,v); return n; };
+  const el = (tag, attrs={}) => { const n=document.createElement(tag); for (const [k,v] of Object.entries(attrs)) n.setAttribute(k,v); return n; };
 
   const state = { apiBase: "", items: [] };
 
@@ -18,40 +18,27 @@
     } catch { return ""; }
   };
 
-  // --------- 绑定现有页面的控件（不破坏你的样式）---------
   function queryByText(tag, re){
-    const list = $$(tag);
-    return list.find(b => re.test((b.innerText || b.textContent || "").trim()));
+    return $$(tag).find(n => re.test((n.innerText || n.textContent || "").trim()));
   }
 
+  // ---------- 绑定现有页面控件（不破坏你的 DOM） ----------
   const els = {
-    url: null,
-    btnFetch: null,
-    btnExport: null,
-    btnClear: null,
-    limit: null,
-    previewBox: null, // 你的大虚线容器内部
-    table: null,
-    tbody: null,
-    toast: null,
+    url: null, btnFetch: null, btnExport: null, btnClear: null, limit: null,
+    previewBox: null, table: null, tbody: null, toast: null
   };
 
   function hookExistingUI(){
-    // 输入框：匹配你原来的 placeholder
     els.url = $('input[placeholder*="目录"], input[placeholder*="页面"], textarea[placeholder*="目录"]') || $('input,textarea');
 
-    // 按钮：按按钮文字匹配
     els.btnFetch  = queryByText('button', /抓取目录|Fetch|抓取/);
     els.btnExport = queryByText('button', /导出\s*Excel/i);
     els.btnClear  = queryByText('button', /清空数据|清空/i);
 
-    // 条数选择
     els.limit = $$('select').find(s => [...s.options].some(o => /50|100|150/.test(o.text)));
 
-    // 你的预览大框（含 ui.no_data）
+    // 找到你页面里的大虚线容器（包含 ui.no_data）
     els.previewBox = $$('div,section,main,article').find(d => (d.textContent||'').includes('ui.no_data')) || document.body;
-
-    // 顶部两条提示条不再生成，保留你的原样式与结构
   }
 
   function ensureToast(){
@@ -69,9 +56,7 @@
 
   function ensureTable(){
     if (els.table && document.body.contains(els.table)) return;
-    // 在你的预览框里渲染表格（不改变外观，只是把数据放进去）
-    const wrap = el('div');
-    wrap.style.cssText = 'margin-top:8px;';
+    const wrap = el('div'); wrap.style.cssText = 'margin-top:8px;';
     els.table = el('table', { class:'grid', style:'width:100%;border-collapse:collapse;background:#fff;font-size:14px;table-layout:fixed;border:1px dashed #ddd;' });
     const thead = el('thead');
     thead.innerHTML = `
@@ -122,15 +107,15 @@
     if (els.toast) els.toast.style.display = 'none';
   }
 
-  // --------- 健康探测（不阻塞）---------
+  // ---------- 健康探测（不阻塞） ----------
   async function probeHealth(api){
     const cands = ['/api/health','/health','/api/healthz','/healthz'];
-    for(const p of cands){
-      try { const r = await fetch(api.replace(/\/$/,'')+p); if(r.ok) return; } catch{}
+    for (const p of cands) {
+      try { const r = await fetch(api.replace(/\/$/,'') + p); if (r.ok) return; } catch {}
     }
   }
 
-  // --------- 抓取（默认 enrich=true 以补价格/MOQ）---------
+  // ---------- 抓取（默认 enrich=true 以补价格） ----------
   async function fetchCatalog(){
     try{
       const api = getApiBase();
@@ -140,18 +125,18 @@
       if(!raw) return toast('fail','请输入目录/列表页链接');
 
       let targetUrl = raw;
-      try { const u = new URL(raw); const u2 = u.searchParams.get('url'); if(u2) targetUrl = decodeURIComponent(u2); } catch{}
+      try { const u = new URL(raw); const u2 = u.searchParams.get('url'); if(u2) targetUrl = decodeURIComponent(u2); } catch {}
 
       probeHealth(api);
 
-      const limit = parseInt((els.limit && els.limit.value) || '50',10) || 50;
+      const limit = parseInt((els.limit && els.limit.value) || '50', 10) || 50;
       toast('ok','正在抓取中…');
 
       const url = `${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}&enrich=true`;
       const res = await fetch(url);
-      if(!res.ok){ clearData(); return toast('fail',`抓取失败：HTTP ${res.status}`); }
-      const data = await res.json().catch(()=> ({}));
+      if(!res.ok){ clearData(); return toast('fail', `抓取失败：HTTP ${res.status}`); }
 
+      const data = await res.json().catch(()=> ({}));
       if(!data || data.ok === false){ clearData(); return toast('fail', data?.message || data?.error || '抓取失败'); }
 
       state.items = data.products || data.items || [];
@@ -164,119 +149,129 @@
     }
   }
 
-  // --------- Excel 导出（优先 ExcelJS + 真实图片；失败回退 .xls）---------
+  // ---------- 导出（优先 ExcelJS + 真实图片；失败回退 .xls） ----------
   async function exportExcel(){
-    if(!state.items.length) return toast('fail','没有可导出的数据');
+    if (!state.items.length) return toast('fail','没有可导出的数据');
 
-    // 有 ExcelJS → 走图片嵌入
-    if(typeof ExcelJS !== 'undefined'){
-      try{
-        const api = getApiBase();
-        const wb  = new ExcelJS.Workbook();
-        const ws  = wb.addWorksheet('Catalog', { properties:{ defaultRowHeight: 60 } });
-
-        ws.columns = [
-          { header:'Item No.', key:'sku',   width:16 },
-          { header:'Picture',  key:'img',   width:12 },
-          { header:'Description', key:'title', width:60 },
-          { header:'MOQ',      key:'moq',   width:10 },
-          { header:'Unit Price', key:'price', width:14 },
-          { header:'Link',     key:'url',   width:42 }
-        ];
-
-        state.items.forEach(it=>{
-          ws.addRow({
-            sku: it.sku ?? it.itemNo ?? it.code ?? '',
-            img: '',
-            title: it.title ?? it.name ?? '',
-            moq: it.moq ?? '',
-            price: it.price ?? '',
-            url: it.url ?? ''
-          });
-        });
-
-        // 超链接 + 行高
-        for(let i=0;i<state.items.length;i++){
-          const rowIdx = i+2;
-          const url = state.items[i].url || '';
-          if(url) ws.getCell(rowIdx,6).value = { text:'链接', hyperlink:url };
-          ws.getRow(rowIdx).height = 64;
-        }
-
-        // 下载图片并嵌入（通过你的图片代理，避免跨域）
-        const toBase64 = (buf) => {
-          const b = new Uint8Array(buf); let s=''; for(let i=0;i<b.length;i++) s+=String.fromCharCode(b[i]); return btoa(s);
-        };
-        const detectExt = (ct, url) => (/png/i.test(ct) || /\.png(\?|$)/i.test(url)) ? 'png' : 'jpeg';
-
-        // 并发控制（避免太多并发）
-        const batch = async (arr, limit, worker) => {
-          const ret = []; let i=0;
-          const run = async () => {
-            while(i < arr.length){
-              const idx = i++; ret.push(worker(arr[idx], idx));
-            }
-          };
-          await Promise.all(Array.from({length:limit}).map(run));
-          return Promise.all(ret);
-        };
-
-        await batch(state.items, 6, async (it, idx) => {
-          if(!it.img) return;
-          try{
-            const proxied = `${api}/v1/api/image?url=${encodeURIComponent(it.img)}`;
-            const r = await fetch(proxied);
-            if(!r.ok) return;
-            const ab  = await r.arrayBuffer();
-            const ct  = r.headers.get('content-type') || '';
-            const ext = detectExt(ct, it.img);
-            const imgId = wb.addImage({ base64:`data:image/${ext};base64,${toBase64(ab)}`, extension:ext });
-
-            const rowIdx = idx + 2; // 表头占第1行
-            // 用“二点锚定”占满 B 列对应单元格
-            ws.addImage(imgId, { tl:{ col:1, row: rowIdx-1 }, br:{ col:2, row: rowIdx } });
-          }catch(e){ /* 忽略个别失败 */ }
-        });
-
-        const buf = await wb.xlsx.writeBuffer();
-        const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        const a = el('a', { download:`catalog-preview-${new Date().toISOString().slice(0,10)}-${Date.now()}.xlsx` });
-        a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
-        setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
-        toast('ok','已导出 Excel（含图片）');
-        return;
-      }catch(e){
-        console.error('[exceljs]', e);
-        toast('fail','ExcelJS 导出遇到问题，回退为 .xls');
-      }
+    // 没有 ExcelJS：降级 .xls（不含图）
+    if (typeof ExcelJS === 'undefined') {
+      toast('fail','未加载 ExcelJS，已回退为 .xls（不含图片）。请在页面引入 ExcelJS CDN 才能嵌入图片。');
+      const table = els.table;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${table ? table.outerHTML : ''}</body></html>`;
+      const blob = new Blob([html], { type:'application/vnd.ms-excel' });
+      const a = el('a', { download:`catalog-${Date.now()}.xls` });
+      a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+      return;
     }
 
-    // 回退（无图片）
-    const table = els.table;
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${table ? table.outerHTML : ''}</body></html>`;
-    const blob = new Blob([html], { type:'application/vnd.ms-excel' });
-    const a = el('a', { download:`catalog-${Date.now()}.xls` });
-    a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
-    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+    try{
+      const api = getApiBase();
+      const wb  = new ExcelJS.Workbook();
+      const ws  = wb.addWorksheet('Catalog', { properties:{ defaultRowHeight: 64 } });
+
+      ws.columns = [
+        { header:'Item No.', key:'sku',   width:16 },
+        { header:'Picture',  key:'img',   width:14 },
+        { header:'Description', key:'title', width:60 },
+        { header:'MOQ',      key:'moq',   width:12 },
+        { header:'Unit Price', key:'price', width:16 },
+        { header:'Link',     key:'url',   width:42 }
+      ];
+
+      state.items.forEach(it=>{
+        ws.addRow({
+          sku: it.sku ?? it.itemNo ?? it.code ?? '',
+          img: '',
+          title: it.title ?? it.name ?? '',
+          moq: it.moq ?? '',
+          price: it.price ?? '',
+          url: it.url ?? ''
+        });
+      });
+
+      // 链接 + 行高
+      for (let i=0;i<state.items.length;i++) {
+        const rowIdx = i + 2; // 第1行为表头
+        const url = state.items[i].url || '';
+        if (url) ws.getCell(rowIdx,6).value = { text:'链接', hyperlink:url };
+        ws.getRow(rowIdx).height = 64;
+      }
+
+      // --- 关键：下载图片并嵌入（纯 base64，不能带 data:image/...;base64, 前缀） ---
+      const toBase64 = (ab) => {
+        const b = new Uint8Array(ab); let s=''; for (let i=0;i<b.length;i++) s += String.fromCharCode(b[i]);
+        // 纯 base64（ExcelJS 需要的就是这个）
+        return btoa(s);
+      };
+      const detectExt = (ct, url) => (/png/i.test(ct) || /\.png(\?|$)/i.test(url)) ? 'png' : 'jpeg';
+
+      // 控制并发，避免一次性太多请求
+      const runBatch = async (arr, limit, worker) => {
+        const q = arr.slice(); const running = [];
+        const tick = () => {
+          while (running.length < limit && q.length) {
+            const idx = arr.length - q.length;
+            const item = q.shift();
+            const p = worker(item, idx).finally(() => running.splice(running.indexOf(p),1));
+            running.push(p);
+          }
+          if (running.length) return Promise.race(running).then(tick);
+        };
+        await tick(); await Promise.all(running);
+      };
+
+      await runBatch(state.items, 6, async (it, idx) => {
+        if (!it.img) return;
+        try {
+          const proxied = `${api}/v1/api/image?url=${encodeURIComponent(it.img)}`;
+          const r = await fetch(proxied);
+          if (!r.ok) return;
+          const ab  = await r.arrayBuffer();
+          const ct  = r.headers.get('content-type') || '';
+          const ext = detectExt(ct, it.img);
+          const base64 = toBase64(ab);
+
+          // ！！一行补丁：ExcelJS 需要纯 base64，不能带 dataURL 前缀
+          const imageId = wb.addImage({ base64: base64, extension: ext });
+
+          const rowIdx = idx + 2; // 表头占第1行
+          // 使用 oneCellAnchor：定位到 B 列对应行，指定尺寸
+          ws.addImage(imageId, { tl:{ col:1, row: rowIdx-1 }, ext:{ width:60, height:60 }, editAs: 'oneCell' });
+        } catch {}
+      });
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = el('a', { download:`catalog-preview-${new Date().toISOString().slice(0,10)}-${Date.now()}.xlsx` });
+      a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+      toast('ok','已导出 Excel（含图片）');
+    } catch (e) {
+      console.error('[exceljs]', e);
+      toast('fail','ExcelJS 导出遇到问题，回退为 .xls（不含图）');
+      const table = els.table;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${table ? table.outerHTML : ''}</body></html>`;
+      const blob = new Blob([html], { type:'application/vnd.ms-excel' });
+      const a = el('a', { download:`catalog-${Date.now()}.xls` });
+      a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+    }
   }
 
-  // --------- 启动：只做“挂接”，不改你页面结构 ---------
+  // ---------- 启动 ----------
   function start(){
     hookExistingUI();
-    // 事件
-    els.btnFetch && els.btnFetch.addEventListener('click', fetchCatalog);
+    els.btnFetch  && els.btnFetch.addEventListener('click', fetchCatalog);
     els.btnExport && els.btnExport.addEventListener('click', exportExcel);
-    els.btnClear && els.btnClear.addEventListener('click', clearData);
+    els.btnClear  && els.btnClear.addEventListener('click', clearData);
     els.url && els.url.addEventListener('keydown', e => { if(e.key==='Enter') fetchCatalog(); });
-    // 初始显示
-    ensureToast();
-    ensureTable();
-    clearData();
+    ensureToast(); ensureTable(); clearData();
   }
 
-  if(document.readyState === 'loading'){
+  if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once:true });
-  }else{
+  } else {
     start();
   }
 })();
