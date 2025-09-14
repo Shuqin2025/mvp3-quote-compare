@@ -28,7 +28,10 @@
     scopes.push(document);
 
     const candidates = [];
-    const selList = ['#url','#inputUrl','#url-input','[name="url"]','[data-role="url"]','input[type="url"]','input[type="text"]','textarea'];
+    const selList = [
+      '#url','#inputUrl','#url-input','[name="url"]','[data-role="url"]',
+      'input[type="url"]','input[type="text"]','textarea'
+    ];
     for (const scope of scopes) {
       for (const sel of selList) candidates.push(...$$(sel, scope));
       candidates.push(
@@ -48,10 +51,8 @@
   const ensureResultRoot = () => {
     if (resultRoot && document.body.contains(resultRoot)) return resultRoot;
     resultRoot = create('div', { id: 'mvp3-result' });
-    resultRoot.style.cssText =
-      'margin:16px 0; padding:0; border:0; background:#fff;';
-    // 永远挂在 body 最后，避开宿主的内部布局
-    document.body.appendChild(resultRoot);
+    resultRoot.style.cssText = 'margin:16px 0; padding:0; border:0; background:#fff;';
+    document.body.appendChild(resultRoot); // 永远挂在 body 末尾
     return resultRoot;
   };
 
@@ -73,6 +74,8 @@
   };
 
   // ===== 表格渲染到“我们自己的容器”里 =====
+  let lastList = []; // 记住最新数据，供导出用
+
   const ensureTable = () => {
     const root = ensureResultRoot();
     let table = root.querySelector('table.mvp3-table');
@@ -97,7 +100,7 @@
       table.appendChild(tbody);
       root.appendChild(table);
 
-      // 导出按钮（轻量实现：生成 Excel 兼容 HTML）
+      // 导出按钮（优先 .xlsx 内嵌图片，若失败则退化到 .xls）
       let bar = root.querySelector('#mvp3-bar');
       if (!bar) {
         bar = create('div', { id:'mvp3-bar' });
@@ -105,7 +108,7 @@
         const btn = create('button', { type:'button' });
         btn.textContent = '导出 Excel（.xlsx）';
         btn.style.cssText = 'padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer';
-        btn.addEventListener('click', exportExcel);
+        btn.addEventListener('click', exportExcelXlsx);
         bar.appendChild(btn);
         root.prepend(bar);
       }
@@ -117,6 +120,8 @@
     ensureTable();
     const tbody = $('#mvp3-tbody');
     if (!tbody) return;
+
+    lastList = Array.isArray(rows) ? rows : [];
 
     if (!Array.isArray(rows) || rows.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;color:#999">No data</td></tr>';
@@ -147,14 +152,108 @@
     tbody.innerHTML = html;
   };
 
-  // ===== 轻量导出（Excel 可直接打开）=====
-  const exportExcel = () => {
+  // ===== .xlsx 导出（内嵌真实图片，依赖 window.ExcelJS 与后端 /v1/api/img 代理）=====
+  const exportExcelXlsx = async () => {
+    try {
+      const rows = lastList || [];
+      if (!rows.length) return toast('fail','没有可导出的数据');
+
+      // 若没有 ExcelJS，退化成 .xls（HTML 版）
+      if (!window.ExcelJS) return exportExcelFallback();
+
+      const ExcelJS = window.ExcelJS;
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('catalog');
+
+      // 列定义
+      ws.columns = [
+        { header:'#',          key:'idx',  width:4  },
+        { header:'Item No.',   key:'sku',  width:18 },
+        { header:'Picture',    key:'pic',  width:10 },
+        { header:'Description',key:'desc', width:60 },
+        { header:'MOQ',        key:'moq',  width:12 },
+        { header:'Unit Price', key:'price',width:16 },
+        { header:'Link',       key:'link', width:12 },
+      ];
+
+      // 行高 & 对齐
+      ws.getRow(1).font = { bold:true };
+      // 数据行从 2 开始
+      const startRow = 2;
+
+      // 准备 API
+      const api = getApiBase();
+
+      // 批量填充
+      for (let i = 0; i < rows.length; i++) {
+        const it = rows[i] || {};
+        const r  = startRow + i;
+
+        // 值
+        ws.getCell(`A${r}`).value = i + 1;
+        ws.getCell(`B${r}`).value = (it.sku ?? it.itemNo ?? it.code ?? '') + '';
+        ws.getCell(`C${r}`).value = ''; // 图片列
+        ws.getCell(`D${r}`).value = (it.title ?? it.name ?? '') + '';
+        ws.getCell(`E${r}`).value = (it.moq ?? '') + '';
+        ws.getCell(`F${r}`).value = (it.price ?? '') + '';
+        if (it.url) {
+          ws.getCell(`G${r}`).value = { text: '链接', hyperlink: it.url };
+          ws.getCell(`G${r}`).font = { color: { argb: 'FF2F6FED' }, underline: true };
+        }
+
+        // 行高给图片留空间
+        ws.getRow(r).height = 32;
+
+        // 内嵌图片（走后端代理，避免 CORS）
+        if (api && it.img) {
+          try {
+            const imgRes = await fetch(`${api}/v1/api/img?url=${encodeURIComponent(it.img)}`);
+            if (imgRes.ok) {
+              const ab  = await imgRes.arrayBuffer();
+              const buf = new Uint8Array(ab);
+
+              // 简单按后缀推测类型
+              const ext = /\.png($|\?)/i.test(it.img) ? 'png' : 'jpeg';
+              const imgId = wb.addImage({ buffer: buf, extension: ext });
+
+              // 把图片放到 C 列该行（单元格范围）
+              ws.addImage(imgId, {
+                tl: { col: 2.1, row: r - 1 + 0.15 },  // C列(从0计数=>2)，微调位置
+                ext: { width: 32, height: 32 }
+              });
+            }
+          } catch (e) {
+            // 图片失败不影响导出
+            console.warn('image embed fail:', e);
+          }
+        }
+      }
+
+      // 样式小优化
+      ws.columns.forEach(c => { c.alignment = { vertical:'middle', wrapText:true }; });
+      ws.getColumn('A').alignment = { vertical:'middle', horizontal:'center' };
+      ws.getColumn('C').alignment = { vertical:'middle', horizontal:'center' };
+
+      // 生成并下载
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url    = URL.createObjectURL(blob);
+      const a      = create('a', { download: `catalog-${Date.now()}.xlsx` });
+      a.href = url; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+      toast('ok','Excel（.xlsx）已生成');
+    } catch (err) {
+      console.error(err);
+      toast('fail','导出 .xlsx 失败，已退化为 .xls');
+      exportExcelFallback();
+    }
+  };
+
+  // 退化版：Excel 可打开的 HTML（.xls）
+  const exportExcelFallback = () => {
     const table = ensureResultRoot().querySelector('table.mvp3-table');
     if (!table) return toast('fail','没有可导出的数据');
-    // 用 Excel 兼容的 HTML
-    const html = `<!DOCTYPE html><html><head>
-      <meta charset="utf-8" />
-    </head><body>${table.outerHTML}</body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${table.outerHTML}</body></html>`;
     const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
     const url  = URL.createObjectURL(blob);
     const a = create('a', { download: `catalog-${Date.now()}.xls` });
@@ -162,7 +261,7 @@
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
   };
 
-  // ===== 抓取 =====
+  // ===== 抓取逻辑 =====
   const els = { url:null, btnFetch:null, pageSize:null, btnClear:null };
   const fetchCatalog = async () => {
     try {
@@ -204,11 +303,12 @@
     const tbody = $('#mvp3-tbody');
     if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;color:#999">No data</td></tr>';
     toastEl.style.display = 'none';
+    lastList = [];
   };
 
   // ===== 绑定事件 =====
   const bind = () => {
-    ensureResultRoot(); // 先创建独立容器
+    ensureResultRoot();
     mountToast();
 
     els.btnFetch  = $('#btnFetch')  || $('button[data-role="fetch"]')  || $('button');
