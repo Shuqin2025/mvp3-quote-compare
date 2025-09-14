@@ -1,219 +1,242 @@
-/* public/ui-enhance.js —— 纯 JS 文件，勿放 <script> 标签 */
+/* public/ui-enhance.js  — 完整版替换 */
+/* 最小依赖：页面里已通过 CDN 引入 ExcelJS 与 FileSaver（你当前 index.html 已引入） */
 
-(() => {
-  // ===== 小工具 =====
-  const $  = (sel, ctx = document) => ctx.querySelector(sel);
+(function () {
+  // ------- 工具函数 -------
+  const $ = (sel, ctx = document) => ctx.querySelector(sel);
   const $$ = (sel, ctx = document) => Array.from(ctx.querySelectorAll(sel));
-  const create = (tag, attrs = {}) => {
-    const el = document.createElement(tag);
-    Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
-    return el;
+  const byText = (texts) => {
+    const all = $$('button, a, [role="button"], input[type="button"], input[type="submit"]');
+    texts = texts.map(t => t.toLowerCase());
+    return all.find(el => texts.some(t => (el.textContent || el.value || '').trim().toLowerCase() === t)) || null;
   };
-
-  const getApiBase = () => {
-    try {
-      const u = new URL(location.href);
-      return (u.searchParams.get('api') || '').replace(/\/+$/,''); // 去掉尾部/
-    } catch { return ''; }
-  };
-
-  // 在按钮附近、常见选择器、占位符文本中“聪明搜索”URL 输入框
-  const findUrlInput = () => {
-    // 1) 先在按钮邻域找
-    const btn = $('#btnFetch') || $('button[data-role="fetch"]') || $('button');
-    const scopes = [];
-    if (btn) {
-      const box = btn.closest('form, .toolbar, .controls, .row, .flex, .container');
-      if (box) scopes.push(box);
-    }
-    scopes.push(document);
-
-    const candidates = [];
-    const selList = [
-      '#url', '#inputUrl', '#url-input', '[name="url"]', '[data-role="url"]',
-      'input[type="url"]', 'input[type="text"]', 'textarea'
-    ];
-    for (const scope of scopes) {
-      for (const sel of selList) candidates.push(...$$(sel, scope));
-      // 再用 placeholder 语义兜底
-      candidates.push(
-        ...$$('input,textarea', scope).filter(el => {
-          const ph = (el.getAttribute('placeholder') || '').toLowerCase();
-          return /url|http|链接|地址|katalog|list|产品|product/.test(ph);
-        })
-      );
-    }
-    // 过滤不可见/禁用
-    const visible = candidates.filter(el => el && !el.disabled && el.offsetParent !== null);
-    // 选内容最长的那个
-    visible.sort((a,b) => (b.value?.length||0) - (a.value?.length||0));
-    return visible[0] || null;
-  };
-
-  // ===== UI 元素（延迟到 DOM 就绪再取更稳） =====
-  const els = { url: null, btnFetch: null, pageSize: null, btnExport: null, btnClear: null, dataPanel: null };
-
-  // ===== Toast =====
-  const toastEl = create('div', { id: 'toast', style: 'display:none' });
-  const mountToast = () => {
-    const host = els.dataPanel || $('#data-panel') || document.body;
-    if (!toastEl.parentNode) {
-      toastEl.style.cssText = 'margin:10px 0;padding:8px 12px;border-radius:6px;background:#fff8ee;display:none;';
-      host.prepend(toastEl);
-    }
-  };
-  const toast = (type, msg) => {
-    const color = type === 'ok' ? '#0ea5e9' : '#f59e0b';
-    toastEl.style.cssText =
-      `margin:10px 0;padding:8px 12px;border-left:4px solid ${color};background:#fff8ee;display:block;`;
-    toastEl.textContent = msg;
-  };
-
-  // ===== 表格渲染 =====
-  const ensureTbody = () => {
-    let tbody = $('#tbody');
-    if (tbody) return tbody;
-
-    let table = $('table.data-table') || $('table');
-    if (!table) {
-      table = create('table', {
-        class: 'data-table',
-        style: 'width:100%;border-collapse:collapse;font-size:14px;'
-      });
-      const thead = create('thead');
-      thead.innerHTML = `
-        <tr style="text-align:left;border-bottom:1px solid #eee;">
-          <th style="padding:8px;width:56px">#</th>
-          <th style="padding:8px">Item No.</th>
-          <th style="padding:8px">Picture</th>
-          <th style="padding:8px">Description</th>
-          <th style="padding:8px">MOQ</th>
-          <th style="padding:8px">Unit Price</th>
-          <th style="padding:8px">link</th>
-        </tr>`;
-      tbody = create('tbody', { id: 'tbody' });
-      table.appendChild(thead);
-      table.appendChild(tbody);
-      (els.dataPanel || document.body).appendChild(table);
+  const toast = (msg) => {
+    // 页面已有提示条就用；没有就用 alert 兜底
+    const bar = $('[data-role="toast"]') || $('.toast') || $('#toast');
+    if (bar) {
+      bar.textContent = msg;
+      bar.style.display = '';
+      bar.classList.add('show');
+      setTimeout(() => bar.classList.remove('show'), 3500);
     } else {
-      tbody = table.tBodies[0] || create('tbody');
-      if (!tbody.id) tbody.id = 'tbody';
-      if (!table.tBodies.length) table.appendChild(tbody);
+      alert(msg);
     }
-    return tbody;
   };
 
-  const render = (rows) => {
-    const tbody = ensureTbody();
-    if (!tbody) return;
-    if (!Array.isArray(rows) || rows.length === 0) {
-      tbody.innerHTML = ''; // 清空留白
+  // 尝试寻找“结果容器”（优先现有容器，否则自动创建）
+  function getResultBox() {
+    const candidates = [
+      '#data', '#result', '#result-box', '#resultPanel', '#data-box', '#dataArea',
+      '.result', '.result-box', '.data-box'
+    ];
+    for (const sel of candidates) {
+      const el = $(sel);
+      if (el) return el;
+    }
+    // 找不到就创建一个
+    let holder = $('#data-holder') || $('.card-body') || $('.container') || $('main') || document.body;
+    let box = document.createElement('div');
+    box.id = 'result-box';
+    box.style.border = '1px dashed var(--border,#e5e7eb)';
+    box.style.borderRadius = '8px';
+    box.style.padding = '8px';
+    box.style.minHeight = '260px';
+    box.style.marginTop = '10px';
+    holder.appendChild(box);
+    return box;
+  }
+
+  // 自动寻找三个关键控件
+  function pickDom() {
+    // 输入框
+    let input = $('#url') || $('#input-url') || $('input[type="text"]') || $('input');
+    // 抓取按钮（支持多语言）
+    let btnFetch =
+      byText(['抓取目录', 'katalog abrufen', 'fetch catalog']) ||
+      $('#btnFetch') || $('[data-role="btn-fetch"]');
+    // 导出
+    let btnExport =
+      byText(['导出 excel (.xlsx)', 'excel exportieren (.xlsx)', 'export excel (.xlsx)', '导出 excel', 'export excel']) ||
+      $('#btnExport') || $('[data-role="btn-export"]');
+    // 清空
+    let btnClear =
+      byText(['清空数据', 'daten leeren', 'clear data']) ||
+      $('#btnClear') || $('[data-role="btn-clear"]');
+
+    return { input, btnFetch, btnExport, btnClear, resultBox: getResultBox() };
+  }
+
+  // 获取 API 根地址（来自 ?api=...）
+  function getApiBase() {
+    const api = new URLSearchParams(location.search).get('api') || '';
+    return api.replace(/\/+$/, ''); // 去掉末尾 /
+  }
+
+  // ------- 渲染 -------
+  function renderList(items) {
+    const { resultBox } = pickDom();
+
+    // 兼容空
+    if (!items || !items.length) {
+      resultBox.innerHTML = `<div style="color:#9ca3af">ui.no_data</div>`;
       return;
     }
-    const html = rows.map((it, i) => {
-      const sku   = it.sku ?? it.itemNo ?? it.code ?? '';
-      const title = it.title ?? it.name ?? '';
-      const img   = it.img
-        ? `<img src="${it.img}" alt="" loading="lazy"
-               style="width:42px;height:42px;object-fit:cover;border:1px solid #eee;border-radius:4px;" />`
-        : '';
-      const price = it.price ?? '';
-      const moq   = it.moq ?? '';
-      const link  = it.url ? `<a href="${it.url}" target="_blank" rel="noopener">link_text</a>` : '';
-      return `
-        <tr style="border-bottom:1px dashed #eee;">
-          <td style="padding:8px">${i + 1}</td>
-          <td style="padding:8px">${sku}</td>
-          <td style="padding:8px">${img}</td>
-          <td style="padding:8px">${title}</td>
-          <td style="padding:8px">${moq}</td>
-          <td style="padding:8px">${price}</td>
-          <td style="padding:8px">${link}</td>
-        </tr>`;
+
+    // 如果页面本身已经有一个表格的 tbody，就优先使用
+    const existingTBody =
+      $('#data-table tbody') ||
+      $('table tbody');
+
+    const headers = [
+      { key: '_idx', label: '#' },
+      { key: 'sku', label: 'Item No.' },
+      { key: 'img', label: 'Picture' },
+      { key: 'title', label: 'Description' },
+      { key: 'moq', label: 'MOQ' },
+      { key: 'price', label: 'Unit Price' }
+    ];
+
+    // 生成 <tr>
+    const buildRowsHtml = (rows) => rows.map((it, i) => {
+      const img = it.img ? `<img src="${it.img}" alt="" style="height:38px;object-fit:contain;border:1px solid #eee;border-radius:6px;" />` : '';
+      const title = it.url ? `<a href="${it.url}" target="_blank" rel="noopener">${it.title || ''}</a>` : (it.title || '');
+      return `<tr>
+        <td style="padding:6px 8px;">${i + 1}</td>
+        <td style="padding:6px 8px;white-space:nowrap;">${it.sku || ''}</td>
+        <td style="padding:6px 8px;">${img}</td>
+        <td style="padding:6px 8px;">${title}</td>
+        <td style="padding:6px 8px;">${it.moq ?? ''}</td>
+        <td style="padding:6px 8px;">${it.price ?? ''}</td>
+      </tr>`;
     }).join('');
-    tbody.innerHTML = html;
-  };
 
-  // ===== 抓取 =====
-  const fetchCatalog = async () => {
-    try {
-      // 重新取一遍，防止热替换或 DOM 更新后引用过期
-      els.url = els.url || findUrlInput();
-
-      const inputVal = (els.url && (els.url.value || els.url.textContent) || '').trim();
-      if (!inputVal) {
-        toast('fail', '请输入或粘贴一个目录/列表页链接');
-        return;
-      }
-
-      // 尝试把 paste 进来的 “api=xxx&url=xxx” 形式解析出真正 URL
-      let targetUrl = inputVal;
-      try {
-        const parsed = new URL(inputVal);
-        const u2 = parsed.searchParams.get('url'); // “…?url=https%3A%2F%2Fxxx”
-        if (u2) targetUrl = decodeURIComponent(u2);
-      } catch { /* 不是 URL 对象也没关系 */ }
-
-      const api = getApiBase();
-      if (!api) {
-        toast('fail', '缺少后端 API 地址：请确保访问链接里有 ?api=... 参数');
-        return;
-      }
-
-      const limit = parseInt((els.pageSize && els.pageSize.value) || '50', 10) || 50;
-
-      toast('ok', '正在抓取中…');
-      // 统一到新的后端路径：/v1/api/catalog/parse
-      const res = await fetch(`${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}`);
-      if (!res.ok) {
-        toast('fail', `抓取失败：HTTP ${res.status}`);
-        render([]);
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-
-      if (!data || data.ok === false) {
-        toast('fail', (data && (data.message || data.error)) ? (data.message || data.error) : '抓取失败');
-        render([]);
-        return;
-      }
-
-      const list = data.products || data.items || [];
-      render(list);
-      toast('ok', `抓取成功，共 ${list.length} 条`);
-    } catch (err) {
-      console.error(err);
-      toast('fail', `抓取失败：${err.message || err}`);
-      render([]);
+    if (existingTBody) {
+      // 仅替换 tbody 内容
+      existingTBody.innerHTML = buildRowsHtml(items);
+    } else {
+      // 整个表格由脚本创建
+      const thead = `<thead><tr>${headers.map(h => `<th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb;">${h.label}</th>`).join('')}</tr></thead>`;
+      const tbody = `<tbody>${buildRowsHtml(items)}</tbody>`;
+      resultBox.innerHTML = `
+        <div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;">
+          <table id="data-table" style="width:100%;border-collapse:collapse;font-size:14px;">
+            ${thead}${tbody}
+          </table>
+        </div>
+      `;
     }
-  };
-
-  const clearData = () => {
-    render([]);
-    toastEl.style.display = 'none';
-  };
-
-  // ===== 绑定事件（DOMContentLoaded后再取 DOM 更稳） =====
-  const bind = () => {
-    els.btnFetch  = $('#btnFetch')  || $('button[data-role="fetch"]')  || $('button');
-    els.pageSize  = $('#pageSize')  || $('select');
-    els.btnExport = $('#btnExport') || $('button[data-role="export"]');
-    els.btnClear  = $('#btnClear')  || $('button[data-role="clear"]');
-    els.dataPanel = $('#data-panel') || $('.data-panel') || document.querySelector('.panel') || document.body;
-    els.url       = findUrlInput();
-
-    mountToast();
-
-    if (els.btnFetch) els.btnFetch.addEventListener('click', fetchCatalog);
-    if (els.btnClear) els.btnClear.addEventListener('click', clearData);
-    if (els.url)      els.url.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') fetchCatalog();
-    });
-  };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bind, { once: true });
-  } else {
-    bind();
   }
+
+  // ------- 导出 Excel -------
+  async function exportExcel(data) {
+    if (!data || !data.length) {
+      toast('没有可导出的数据');
+      return;
+    }
+    if (typeof ExcelJS === 'undefined') {
+      toast('ExcelJS 未加载');
+      return;
+    }
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Catalog');
+
+    ws.columns = [
+      { header: '#', key: '_idx', width: 6 },
+      { header: 'Item No.', key: 'sku', width: 14 },
+      { header: 'Title', key: 'title', width: 60 },
+      { header: 'URL', key: 'url', width: 60 },
+      { header: 'MOQ', key: 'moq', width: 10 },
+      { header: 'Price', key: 'price', width: 12 },
+      { header: 'Image', key: 'img', width: 60 },
+    ];
+
+    data.forEach((it, i) => {
+      ws.addRow({
+        _idx: i + 1,
+        sku: it.sku || '',
+        title: it.title || '',
+        url: it.url || '',
+        moq: it.moq ?? '',
+        price: it.price ?? '',
+        img: it.img || ''
+      });
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const name = `catalog_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.xlsx`;
+    if (typeof saveAs === 'function') {
+      saveAs(blob, name);
+    } else {
+      // 兜底下载
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    }
+  }
+
+  // ------- 绑定事件 -------
+  function bindEvents() {
+    const { input, btnFetch, btnExport, btnClear } = pickDom();
+
+    if (btnFetch) {
+      btnFetch.addEventListener('click', async () => {
+        const raw = (input && input.value || '').trim();
+        if (!raw) {
+          toast('请输入或粘贴一个目录/列表页链接');
+          return;
+        }
+        const api = getApiBase();
+        if (!api) {
+          toast('缺少 api 参数，例如 ?api=https://your-backend.onrender.com');
+          return;
+        }
+        const endpoint = `${api}/v1/api/parse?url=${encodeURIComponent(raw)}`;
+
+        try {
+          // 为了方便你在 Console 中观察
+          console.info('[fetch] ->', endpoint);
+          const res = await fetch(endpoint, { method: 'GET' });
+          const text = await res.text();
+          let data;
+          try { data = JSON.parse(text); } catch { data = null; }
+
+          if (!res.ok || !data || data.ok === false) {
+            throw new Error(`HTTP ${res.status} / 解析失败`);
+          }
+
+          const items = (data.items && data.items.length ? data.items : (data.products || []));
+          window.__lastData = items;          // 保存给“导出 Excel”用
+          renderList(items);                  // 渲染到页面
+          toast(`抓取成功，共 ${items.length} 条`);
+        } catch (err) {
+          console.error(err);
+          toast(`抓取失败：${err.message || err}`);
+        }
+      });
+    }
+
+    if (btnExport) {
+      btnExport.addEventListener('click', async () => {
+        const rows = window.__lastData || [];
+        await exportExcel(rows);
+      });
+    }
+
+    if (btnClear) {
+      btnClear.addEventListener('click', () => {
+        window.__lastData = [];
+        const { resultBox } = pickDom();
+        resultBox.innerHTML = `<div style="color:#9ca3af">ui.no_data</div>`;
+        toast('已清空');
+      });
+    }
+  }
+
+  // 初始化
+  document.addEventListener('DOMContentLoaded', bindEvents);
 })();
