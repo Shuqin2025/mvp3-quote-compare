@@ -27,11 +27,13 @@
     return visible[0] || null;
   };
 
-  // ===== 如果容器是 <textarea>，就在其后面插入可视化 DIV 用于渲染表格 =====
+  // ===== 解决 “容器是 textarea/input” 的渲染问题 =====
   const getRenderHost = () => {
+    // 你这个页面左侧的大框是 <textarea id="data-panel">…</textarea>
     let host = $('#data-panel') || $('.data-panel') || document.querySelector('.panel');
-    if (!host) host = $('textarea') || $('input') || document.body;
+    if (!host) return document.body;
 
+    // 如果是 <textarea>/<input>，就在它后面插一个真正的 DIV 来放表格
     const tag = (host.tagName || '').toUpperCase();
     if (tag === 'TEXTAREA' || tag === 'INPUT') {
       let div = document.getElementById('render-host');
@@ -98,7 +100,6 @@
     const tbody = ensureTbody();
     if (!tbody) return;
     if (!Array.isArray(rows) || rows.length === 0) { tbody.innerHTML = ''; return; }
-
     const html = rows.map((it, i) => {
       const sku   = it.sku ?? it.itemNo ?? it.code ?? '';
       const title = it.title ?? it.name ?? '';
@@ -120,18 +121,8 @@
     tbody.innerHTML = html;
   };
 
-  // ===== 动态加载 XLSX 库（SheetJS），仅在需要时加载 =====
-  const loadXlsx = () => new Promise((resolve, reject) => {
-    if (window.XLSX) return resolve(window.XLSX);
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js';
-    s.onload = () => resolve(window.XLSX);
-    s.onerror = () => reject(new Error('XLSX 加载失败'));
-    document.head.appendChild(s);
-  });
-
-  // ===== 导出：优先导出 XLSX；失败则回退为 CSV =====
-  const exportCsvFallback = () => {
+  // ===== 简易 CSV 导出（Excel 可直接打开） =====
+  const exportCsv = () => {
     if (!lastRows.length) { toast('fail', '没有可导出的数据'); return; }
     const header = ['Item No.','Picture','Description','MOQ','Unit Price','Link'];
     const lines = [header.join(',')];
@@ -155,42 +146,6 @@
     a.download = `catalog-${Date.now()}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast('ok', '已导出 CSV（Excel 可直接打开）');
-  };
-
-  const exportXlsx = async () => {
-    if (!lastRows.length) { toast('fail', '没有可导出的数据'); return; }
-    try {
-      await loadXlsx();
-      const rows = lastRows.map(it => ({
-        'Item No.':   it.sku ?? it.itemNo ?? it.code ?? '',
-        'Picture':    it.img ?? '',
-        'Description':it.title ?? it.name ?? '',
-        'MOQ':        it.moq ?? '',
-        'Unit Price': it.price ?? '',
-        'Link':       it.url ?? ''
-      }));
-      const ws = XLSX.utils.json_to_sheet(rows, { header: ['Item No.','Picture','Description','MOQ','Unit Price','Link'] });
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Catalog');
-      const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-
-      // 优先使用 FileSaver（项目里大概率已引入）；否则使用 <a> 兜底
-      if (typeof saveAs === 'function') {
-        saveAs(blob, `catalog-${Date.now()}.xlsx`);
-      } else {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `catalog-${Date.now()}.xlsx`;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      }
-      toast('ok', '已导出 Excel（.xlsx）');
-    } catch (e) {
-      console.warn('导出 XLSX 失败，回退 CSV：', e);
-      exportCsvFallback();
-    }
   };
 
   // ===== 抓取 =====
@@ -200,7 +155,7 @@
       const inputVal = (urlEl && (urlEl.value || urlEl.textContent) || '').trim();
       if (!inputVal) { toast('fail', '请输入或粘贴一个目录/列表页链接'); return; }
 
-      // 兼容「把链接包进 ?url=xxx 的形式」
+      // 如果用户粘贴的是 “…?url=xxx” 包装，加工还原
       let targetUrl = inputVal;
       try { const parsed = new URL(inputVal); const u2 = parsed.searchParams.get('url'); if (u2) targetUrl = decodeURIComponent(u2); } catch {}
 
@@ -211,12 +166,10 @@
       const limit = parseInt((pageSizeEl && pageSizeEl.value) || '50', 10) || 50;
 
       toast('ok', '正在抓取中…');
-      // 统一使用新的后端解析路由（你的后端已支持）
       const res = await fetch(`${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}`);
       if (!res.ok) { toast('fail', `抓取失败：HTTP ${res.status}`); render([]); return; }
-
       const data = await res.json().catch(() => ({}));
-      // 支持 products 或 items 两种字段（你给的样例都有）
+
       const list = (data && (data.products || data.items)) || [];
       render(list);
       toast('ok', `抓取成功，共 ${list.length} 条`);
@@ -231,31 +184,25 @@
 
   // ===== 绑定事件 =====
   const bind = () => {
-    mountToast();
-
-    // 抓取
-    ( $('#btnFetch') || $('button[data-role="fetch"]') || $('button') ).addEventListener('click', fetchCatalog);
-
-    // 导出：优先绑定页面自带的 “导出 Excel (.xlsx)” 按钮；如果没有就自动加一个
-    let btnExport = $('#btnExport') 
-                 || $$('button').find(b => /excel|xlsx/i.test(b.textContent || ''))
-                 || $('button[data-role="export"]');
+    // 保证有一个导出按钮（如果页面本身没有就自动加一个）
+    let btnExport = $('#btnExport') || $('button[data-role="export"]');
     if (!btnExport) {
       const btnFetch = $('#btnFetch') || $('button[data-role="fetch"]') || $('button');
       btnExport = document.createElement('button');
       btnExport.id = 'btnExport';
-      btnExport.textContent = '导出 Excel（.xlsx）';
+      btnExport.textContent = '导出 CSV';
       btnExport.style.cssText = 'margin-left:8px;padding:6px 10px;';
       if (btnFetch && btnFetch.parentElement) btnFetch.parentElement.appendChild(btnExport);
       else document.body.prepend(btnExport);
     }
-    btnExport.addEventListener('click', exportXlsx);
 
-    // 清空
     const btnClear = $('#btnClear') || $('button[data-role="clear"]');
-    if (btnClear) btnClear.addEventListener('click', clearData);
 
-    // 输入框回车直接抓取
+    mountToast();
+    ( $('#btnFetch') || $('button[data-role="fetch"]') || $('button') ).addEventListener('click', fetchCatalog);
+    if (btnExport) btnExport.addEventListener('click', exportCsv);
+    if (btnClear)  btnClear.addEventListener('click', clearData);
+
     const urlEl = findUrlInput();
     if (urlEl) urlEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') fetchCatalog(); });
   };
