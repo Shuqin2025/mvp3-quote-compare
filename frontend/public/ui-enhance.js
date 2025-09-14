@@ -1,4 +1,4 @@
-/* public/ui-enhance.js —— 纯 JS 文件，勿包 <script> 标签 */
+/* public/ui-enhance.js —— 纯 JS 文件，勿放 <script> 标签 */
 
 (() => {
   // ===== 小工具 =====
@@ -13,12 +13,13 @@
   const getApiBase = () => {
     try {
       const u = new URL(location.href);
-      return (u.searchParams.get('api') || '').replace(/\/+$/,'');
+      return (u.searchParams.get('api') || '').replace(/\/+$/,''); // 去掉尾部/
     } catch { return ''; }
   };
 
-  // “聪明”查找 URL 输入框（适配不同占位页）
+  // 在按钮附近、常见选择器、占位符文本中“聪明搜索”URL 输入框
   const findUrlInput = () => {
+    // 1) 先在按钮邻域找
     const btn = $('#btnFetch') || $('button[data-role="fetch"]') || $('button');
     const scopes = [];
     if (btn) {
@@ -28,9 +29,13 @@
     scopes.push(document);
 
     const candidates = [];
-    const selList = ['#url','#inputUrl','#url-input','[name="url"]','[data-role="url"]','input[type="url"]','input[type="text"]','textarea'];
+    const selList = [
+      '#url', '#inputUrl', '#url-input', '[name="url"]', '[data-role="url"]',
+      'input[type="url"]', 'input[type="text"]', 'textarea'
+    ];
     for (const scope of scopes) {
       for (const sel of selList) candidates.push(...$$(sel, scope));
+      // 再用 placeholder 语义兜底
       candidates.push(
         ...$$('input,textarea', scope).filter(el => {
           const ph = (el.getAttribute('placeholder') || '').toLowerCase();
@@ -38,30 +43,22 @@
         })
       );
     }
+    // 过滤不可见/禁用
     const visible = candidates.filter(el => el && !el.disabled && el.offsetParent !== null);
+    // 选内容最长的那个
     visible.sort((a,b) => (b.value?.length||0) - (a.value?.length||0));
     return visible[0] || null;
   };
 
-  // ===== 我们自己的结果容器：避免被宿主页面清空 =====
-  let resultRoot = null;
-  const ensureResultRoot = () => {
-    if (resultRoot && document.body.contains(resultRoot)) return resultRoot;
-    resultRoot = create('div', { id: 'mvp3-result' });
-    resultRoot.style.cssText =
-      'margin:16px 0; padding:0; border:0; background:#fff;';
-    // 永远挂在 body 最后，避开宿主的内部布局
-    document.body.appendChild(resultRoot);
-    return resultRoot;
-  };
+  // ===== UI 元素（延迟到 DOM 就绪再取更稳） =====
+  const els = { url: null, btnFetch: null, pageSize: null, btnExport: null, btnClear: null, dataPanel: null };
 
   // ===== Toast =====
   const toastEl = create('div', { id: 'toast', style: 'display:none' });
   const mountToast = () => {
-    const host = ensureResultRoot();
+    const host = els.dataPanel || $('#data-panel') || document.body;
     if (!toastEl.parentNode) {
-      toastEl.style.cssText =
-        'margin:10px 0;padding:8px 12px;border-left:4px solid #0ea5e9;background:#f0f9ff;display:none;';
+      toastEl.style.cssText = 'margin:10px 0;padding:8px 12px;border-radius:6px;background:#fff8ee;display:none;';
       host.prepend(toastEl);
     }
   };
@@ -72,57 +69,47 @@
     toastEl.textContent = msg;
   };
 
-  // ===== 表格渲染到“我们自己的容器”里 =====
-  const ensureTable = () => {
-    const root = ensureResultRoot();
-    let table = root.querySelector('table.mvp3-table');
+  // ===== 表格渲染 =====
+  const ensureTbody = () => {
+    let tbody = $('#tbody');
+    if (tbody) return tbody;
+
+    let table = $('table.data-table') || $('table');
     if (!table) {
       table = create('table', {
-        class: 'mvp3-table',
-        style: 'width:100%;border-collapse:collapse;font-size:14px;table-layout:fixed'
+        class: 'data-table',
+        style: 'width:100%;border-collapse:collapse;font-size:14px;'
       });
       const thead = create('thead');
       thead.innerHTML = `
-        <tr style="text-align:left;border-bottom:1px solid #eee;background:#fafafa">
-          <th style="padding:8px;width:48px">#</th>
-          <th style="padding:8px;width:180px">Item No.</th>
-          <th style="padding:8px;width:64px">Picture</th>
+        <tr style="text-align:left;border-bottom:1px solid #eee;">
+          <th style="padding:8px;width:56px">#</th>
+          <th style="padding:8px">Item No.</th>
+          <th style="padding:8px">Picture</th>
           <th style="padding:8px">Description</th>
-          <th style="padding:8px;width:120px">MOQ</th>
-          <th style="padding:8px;width:140px">Unit Price</th>
-          <th style="padding:8px;width:80px">Link</th>
+          <th style="padding:8px">MOQ</th>
+          <th style="padding:8px">Unit Price</th>
+          <th style="padding:8px">link</th>
         </tr>`;
-      const tbody = create('tbody', { id: 'mvp3-tbody' });
+      tbody = create('tbody', { id: 'tbody' });
       table.appendChild(thead);
       table.appendChild(tbody);
-      root.appendChild(table);
-
-      // 导出按钮（轻量实现：生成 Excel 兼容 HTML）
-      let bar = root.querySelector('#mvp3-bar');
-      if (!bar) {
-        bar = create('div', { id:'mvp3-bar' });
-        bar.style.cssText = 'margin:10px 0;display:flex;gap:8px;flex-wrap:wrap';
-        const btn = create('button', { type:'button' });
-        btn.textContent = '导出 Excel（.xlsx）';
-        btn.style.cssText = 'padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer';
-        btn.addEventListener('click', exportExcel);
-        bar.appendChild(btn);
-        root.prepend(bar);
-      }
+      (els.dataPanel || document.body).appendChild(table);
+    } else {
+      tbody = table.tBodies[0] || create('tbody');
+      if (!tbody.id) tbody.id = 'tbody';
+      if (!table.tBodies.length) table.appendChild(tbody);
     }
-    return table;
+    return tbody;
   };
 
   const render = (rows) => {
-    ensureTable();
-    const tbody = $('#mvp3-tbody');
+    const tbody = ensureTbody();
     if (!tbody) return;
-
     if (!Array.isArray(rows) || rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;color:#999">No data</td></tr>';
+      tbody.innerHTML = ''; // 清空留白
       return;
     }
-
     const html = rows.map((it, i) => {
       const sku   = it.sku ?? it.itemNo ?? it.code ?? '';
       const title = it.title ?? it.name ?? '';
@@ -132,13 +119,13 @@
         : '';
       const price = it.price ?? '';
       const moq   = it.moq ?? '';
-      const link  = it.url ? `<a href="${it.url}" target="_blank" rel="noopener">链接</a>` : '';
+      const link  = it.url ? `<a href="${it.url}" target="_blank" rel="noopener">link_text</a>` : '';
       return `
-        <tr style="border-bottom:1px dashed #eee">
+        <tr style="border-bottom:1px dashed #eee;">
           <td style="padding:8px">${i + 1}</td>
-          <td style="padding:8px;word-break:break-all">${sku}</td>
+          <td style="padding:8px">${sku}</td>
           <td style="padding:8px">${img}</td>
-          <td style="padding:8px;word-break:break-word">${title}</td>
+          <td style="padding:8px">${title}</td>
           <td style="padding:8px">${moq}</td>
           <td style="padding:8px">${price}</td>
           <td style="padding:8px">${link}</td>
@@ -147,78 +134,81 @@
     tbody.innerHTML = html;
   };
 
-  // ===== 轻量导出（Excel 可直接打开）=====
-  const exportExcel = () => {
-    const table = ensureResultRoot().querySelector('table.mvp3-table');
-    if (!table) return toast('fail','没有可导出的数据');
-    // 用 Excel 兼容的 HTML
-    const html = `<!DOCTYPE html><html><head>
-      <meta charset="utf-8" />
-    </head><body>${table.outerHTML}</body></html>`;
-    const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-    const url  = URL.createObjectURL(blob);
-    const a = create('a', { download: `catalog-${Date.now()}.xls` });
-    a.href = url; document.body.appendChild(a); a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
-  };
-
   // ===== 抓取 =====
-  const els = { url:null, btnFetch:null, pageSize:null, btnClear:null };
   const fetchCatalog = async () => {
     try {
+      // 重新取一遍，防止热替换或 DOM 更新后引用过期
       els.url = els.url || findUrlInput();
-      const inputVal = (els.url && (els.url.value || els.url.textContent) || '').trim();
-      if (!inputVal) return toast('fail','请输入或粘贴一个目录/列表页链接');
 
+      const inputVal = (els.url && (els.url.value || els.url.textContent) || '').trim();
+      if (!inputVal) {
+        toast('fail', '请输入或粘贴一个目录/列表页链接');
+        return;
+      }
+
+      // 尝试把 paste 进来的 “api=xxx&url=xxx” 形式解析出真正 URL
       let targetUrl = inputVal;
       try {
         const parsed = new URL(inputVal);
-        const u2 = parsed.searchParams.get('url');
+        const u2 = parsed.searchParams.get('url'); // “…?url=https%3A%2F%2Fxxx”
         if (u2) targetUrl = decodeURIComponent(u2);
-      } catch {}
+      } catch { /* 不是 URL 对象也没关系 */ }
 
       const api = getApiBase();
-      if (!api) return toast('fail','缺少后端 API 地址：请确保访问链接里有 ?api=... 参数');
+      if (!api) {
+        toast('fail', '缺少后端 API 地址：请确保访问链接里有 ?api=... 参数');
+        return;
+      }
 
       const limit = parseInt((els.pageSize && els.pageSize.value) || '50', 10) || 50;
 
-      toast('ok','正在抓取中…');
+      toast('ok', '正在抓取中…');
+      // 统一到新的后端路径：/v1/api/catalog/parse
       const res = await fetch(`${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}`);
-      if (!res.ok) { render([]); return toast('fail', `抓取失败：HTTP ${res.status}`); }
+      if (!res.ok) {
+        toast('fail', `抓取失败：HTTP ${res.status}`);
+        render([]);
+        return;
+      }
       const data = await res.json().catch(() => ({}));
 
-      if (!data || data.ok === false) { render([]); return toast('fail', data?.message || data?.error || '抓取失败'); }
+      if (!data || data.ok === false) {
+        toast('fail', (data && (data.message || data.error)) ? (data.message || data.error) : '抓取失败');
+        render([]);
+        return;
+      }
 
       const list = data.products || data.items || [];
       render(list);
       toast('ok', `抓取成功，共 ${list.length} 条`);
     } catch (err) {
       console.error(err);
-      render([]);
       toast('fail', `抓取失败：${err.message || err}`);
+      render([]);
     }
   };
 
   const clearData = () => {
-    ensureTable();
-    const tbody = $('#mvp3-tbody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;color:#999">No data</td></tr>';
+    render([]);
     toastEl.style.display = 'none';
   };
 
-  // ===== 绑定事件 =====
+  // ===== 绑定事件（DOMContentLoaded后再取 DOM 更稳） =====
   const bind = () => {
-    ensureResultRoot(); // 先创建独立容器
-    mountToast();
-
     els.btnFetch  = $('#btnFetch')  || $('button[data-role="fetch"]')  || $('button');
     els.pageSize  = $('#pageSize')  || $('select');
+    els.btnExport = $('#btnExport') || $('button[data-role="export"]');
     els.btnClear  = $('#btnClear')  || $('button[data-role="clear"]');
+    els.dataPanel = $('#data-panel') || $('.data-panel') || document.querySelector('.panel') || document.body;
     els.url       = findUrlInput();
+
+    mountToast();
 
     if (els.btnFetch) els.btnFetch.addEventListener('click', fetchCatalog);
     if (els.btnClear) els.btnClear.addEventListener('click', clearData);
-    if (els.url)      els.url.addEventListener('keydown', (e) => { if (e.key === 'Enter') fetchCatalog(); });
+    if (els.url)      els.url.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') fetchCatalog();
+    });
   };
 
   if (document.readyState === 'loading') {
