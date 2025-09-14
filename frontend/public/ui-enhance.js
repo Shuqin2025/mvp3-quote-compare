@@ -1,138 +1,178 @@
-/* public/ui-enhance.js  —  最小可用并带容错的版本（去掉 /v1 前缀） */
+/* public/ui-enhance.js  — 稳定版（用固定 ID，不再猜控件） */
+/* 需：index.html 里有 #input-url、#btnFetch、#btnExport、#btnClear、#result-box（或已有 #data-table tbody） */
+/* 需：页面已通过 CDN 引入 ExcelJS 与 FileSaver（你当前 index.html 已经有） */
 
-/** 获取 i18n 词条（容错） */
-function t(key, fallback) {
-  try {
-    return (window.i18n && typeof window.i18n.t === "function")
-      ? window.i18n.t(key) ?? fallback ?? key
-      : (fallback ?? key);
-  } catch {
-    return fallback ?? key;
-  }
-}
+(function () {
+  // ------- 小工具 -------
+  const $ = (sel, ctx = document) => ctx.querySelector(sel);
+  const $$ = (sel, ctx = document) => Array.from(ctx.querySelectorAll(sel));
 
-/** 简单的吐司提示（可替换为你页面上的提示组件） */
-function toast(msg) {
-  console.log("[toast]", msg);
-  try {
-    const bar = document.getElementById("toast-bar");
+  const toast = (msg) => {
+    // 简单提示：尽量不依赖页面已有组件，兜底 alert
+    const bar = $('[data-role="toast"]') || $('.toast') || $('#toast');
     if (bar) {
       bar.textContent = msg;
-      bar.style.display = "block";
-      clearTimeout(bar._h);
-      bar._h = setTimeout(() => (bar.style.display = "none"), 3000);
+      bar.style.display = '';
+      bar.classList.add('show');
+      setTimeout(() => bar.classList.remove('show'), 3000);
+    } else {
+      console.info('[toast]', msg);
+      alert(msg);
     }
-  } catch {}
-}
+  };
 
-/** 读取并规范化 ?api= 参数，或使用同源 */
-function getApiBase() {
-  const sp = new URLSearchParams(location.search);
-  let base = (sp.get("api") || "").trim();
-
-  // 如果没传 api，用同源
-  if (!base) return location.origin;
-
-  // 如果只给了域名，补 https://
-  if (!/^https?:\/\//i.test(base)) {
-    base = "https://" + base;
+  // 读 ?api=...
+  function getApiBase() {
+    const api = new URLSearchParams(location.search).get('api') || '';
+    return api.replace(/\/+$/, '');
   }
 
-  // 去掉末尾的斜杠
-  base = base.replace(/\/+$/, "");
-  return base;
-}
-
-/** 构建后端解析接口完整 URL（注意：没有 /v1 前缀） */
-function buildParseUrl(targetUrl) {
-  const apiBase = getApiBase();
-  const PATH_PARSE = "/api/parse";     // ← 关键：使用 /api/parse，而不是 /v1/api/parse
-  const url = encodeURIComponent(targetUrl);
-  return `${apiBase}${PATH_PARSE}?url=${url}`;
-}
-
-/** 抓取按钮点击 */
-async function handleFetch() {
-  const input = document.getElementById("urlInput") || document.querySelector("input[type=text]");
-  if (!input) {
-    toast(t("toast_fail_prefix", "抓取失败：") + "找不到输入框");
-    return;
-  }
-
-  const raw = (input.value || "").trim();
-  if (!raw) {
-    toast(t("toast_fail_prefix", "抓取失败：") + t("ui.input_hint", "请输入或粘贴一个目录/列表页链接"));
-    return;
-  }
-
-  // 允许用户把 API 放在输入里（你当前 UI 就是这样用的）
-  // 例如： https://你的前端/?api=https://你的后端.com
-  // 这里只解析 “?api=” 在当前页面的 query，不再从 input 的文本里再拆 api，避免混乱
-
-  const fetchUrl = buildParseUrl(raw);
-  console.log("[fetch] ->", fetchUrl);
-
-  try {
-    const res = await fetch(fetchUrl, { method: "GET", credentials: "omit" });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+  // 渲染列表到页面（优先写入既有的 table tbody）
+  function renderList(items) {
+    const resultBox = $('#result-box') || document.body;
+    // 空数据
+    if (!items || !items.length) {
+      if (resultBox) resultBox.innerHTML = `<div style="color:#9ca3af">ui.no_data</div>`;
+      return;
     }
-    const data = await res.json().catch(() => ({}));
 
-    // 统计或数据展示
-    const count = (data.count ?? data.items?.length ?? data.products?.length ?? 0);
-    toast(t("toast_success_prefix", "抓取成功，共 ") + count + " 条");
+    const existingTBody =
+      $('#data-table tbody') ||
+      $('table tbody');
 
-    // 渲染空白区（如果有）
-    const box = document.getElementById("resultBox") || document.querySelector(".result-box");
-    if (box) {
-      box.innerHTML = ""; // 清空
-      const pre = document.createElement("pre");
-      pre.style.margin = "8px";
-      pre.style.whiteSpace = "pre-wrap";
-      pre.textContent = JSON.stringify(
-        { ok: true, count, sample: (data.items ?? data.products ?? []).slice(0, 5) },
-        null, 2
-      );
-      box.appendChild(pre);
+    const headers = [
+      { key: '_idx', label: '#' },
+      { key: 'sku',  label: 'Item No.' },
+      { key: 'img',  label: 'Picture' },
+      { key: 'title',label: 'Description' },
+      { key: 'moq',  label: 'MOQ' },
+      { key: 'price',label: 'Unit Price' },
+    ];
+
+    const buildRowsHtml = rows => rows.map((it, i) => {
+      const img = it.img ? `<img src="${it.img}" alt="" style="height:38px;object-fit:contain;border:1px solid #eee;border-radius:6px;" />` : '';
+      const title = it.url ? `<a href="${it.url}" target="_blank" rel="noopener">${it.title || ''}</a>` : (it.title || '');
+      return `<tr>
+        <td style="padding:6px 8px;">${i + 1}</td>
+        <td style="padding:6px 8px;white-space:nowrap;">${it.sku || ''}</td>
+        <td style="padding:6px 8px;">${img}</td>
+        <td style="padding:6px 8px;">${title}</td>
+        <td style="padding:6px 8px;">${it.moq ?? ''}</td>
+        <td style="padding:6px 8px;">${it.price ?? ''}</td>
+      </tr>`;
+    }).join('');
+
+    if (existingTBody) {
+      existingTBody.innerHTML = buildRowsHtml(items);
+    } else {
+      const thead = `<thead><tr>${headers.map(h => `<th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb;">${h.label}</th>`).join('')}</tr></thead>`;
+      const tbody = `<tbody>${buildRowsHtml(items)}</tbody>`;
+      resultBox.innerHTML = `
+        <div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;">
+          <table id="data-table" style="width:100%;border-collapse:collapse;font-size:14px;">
+            ${thead}${tbody}
+          </table>
+        </div>
+      `;
     }
-  } catch (err) {
-    console.error(err);
-    toast(t("toast_fail_prefix", "抓取失败：") + (err?.message || "网络错误"));
   }
-}
 
-/** 导出 Excel（保留原行为：需要后端提供 /api/export 或前端本地导出逻辑） */
-async function handleExport() {
-  try {
-    // 这里先给出占位提示，等你后端导出就绪后再补
-    toast(t("export_not_ready", "导出功能暂未接入后端"));
-  } catch (err) {
-    console.error(err);
-    toast(t("toast_fail_prefix", "导出失败：") + (err?.message || "未知错误"));
+  // 导出 Excel（依赖 ExcelJS + FileSaver）
+  async function exportExcel(rows) {
+    if (!rows || !rows.length) return toast('没有可导出的数据');
+    if (typeof ExcelJS === 'undefined') return toast('ExcelJS 未加载');
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Catalog');
+
+    ws.columns = [
+      { header: '#',       key: '_idx', width: 6  },
+      { header: 'Item No.',key: 'sku',  width: 14 },
+      { header: 'Title',   key: 'title',width: 60 },
+      { header: 'URL',     key: 'url',  width: 60 },
+      { header: 'MOQ',     key: 'moq',  width: 10 },
+      { header: 'Price',   key: 'price',width: 12 },
+      { header: 'Image',   key: 'img',  width: 60 },
+    ];
+
+    rows.forEach((it, i) => ws.addRow({
+      _idx: i + 1,
+      sku: it.sku || '',
+      title: it.title || '',
+      url: it.url || '',
+      moq: it.moq ?? '',
+      price: it.price ?? '',
+      img: it.img || ''
+    }));
+
+    const buf  = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const name = `catalog_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.xlsx`;
+
+    if (typeof saveAs === 'function') saveAs(blob, name);
+    else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    }
   }
-}
 
-/** 清空数据展示区 */
-function handleClear() {
-  const box = document.getElementById("resultBox") || document.querySelector(".result-box");
-  if (box) box.innerHTML = "";
-  toast(t("cleared", "已清空数据"));
-}
+  // 事件绑定（仅用固定 ID）
+  function bind() {
+    const input    = $('#input-url');
+    const btnFetch = $('#btnFetch');
+    const btnExp   = $('#btnExport');
+    const btnClear = $('#btnClear');
 
-/** 绑定事件 */
-function bind() {
-  const btnFetch  = document.getElementById("btnFetch")  || document.querySelector('[data-role="fetch"]');
-  const btnExport = document.getElementById("btnExport") || document.querySelector('[data-role="export"]');
-  const btnClear  = document.getElementById("btnClear")  || document.querySelector('[data-role="clear"]');
+    if (!input)   return toast('找不到输入框（请给链接输入框加 id="input-url"）');
+    if (!btnFetch) return toast('找不到“抓取目录”按钮（请加 id="btnFetch"）');
 
-  btnFetch  && btnFetch.addEventListener("click", handleFetch);
-  btnExport && btnExport.addEventListener("click", handleExport);
-  btnClear  && btnClear.addEventListener("click", handleClear);
-}
+    btnFetch.addEventListener('click', async () => {
+      const raw = (input.value || '').trim();
+      if (!raw) return toast('请输入或粘贴一个目录/列表页链接');
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", bind);
-} else {
-  bind();
-}
+      const api = getApiBase();
+      if (!api) return toast('缺少 api 参数，例如 ?api=https://your-backend.onrender.com');
+
+      const url = `${api}/v1/api/parse?url=${encodeURIComponent(raw)}`;
+
+      try {
+        console.info('[fetch] ->', url);
+        const res  = await fetch(url, { method: 'GET' });
+        const text = await res.text();
+        let data; try { data = JSON.parse(text); } catch { data = null; }
+
+        if (!res.ok || !data || data.ok === false) {
+          throw new Error(`HTTP ${res.status} / 解析失败`);
+        }
+
+        const items = (data.items && data.items.length ? data.items : (data.products || []));
+        window.__lastData = items;
+        renderList(items);
+        toast(`抓取成功，共 ${items.length} 条`);
+      } catch (e) {
+        console.error(e);
+        toast(`抓取失败：${e.message || e}`);
+      }
+    });
+
+    if (btnExp) {
+      btnExp.addEventListener('click', () => exportExcel(window.__lastData || []));
+    }
+
+    if (btnClear) {
+      btnClear.addEventListener('click', () => {
+        window.__lastData = [];
+        const box = $('#result-box');
+        if (box) box.innerHTML = `<div style="color:#9ca3af">ui.no_data</div>`;
+        toast('已清空');
+      });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', bind);
+})();
