@@ -1,219 +1,204 @@
-/* public/ui-enhance.js —— 纯 JS 文件，勿放 <script> 标签 */
+/* ui-enhance v3.5 — MVP3 页面骨架脚本（稳定版）
+ * 功能：
+ * 1) 解析 ?api=… 作为后端 Base（无则默认同源）
+ * 2) “抓取目录” 调用：GET {API}/v1/api/catalog/parse?url=…&limit=…
+ * 3) 结果在页面下方表格渲染
+ * 4) “导出 Excel（.xlsx）” 调用：GET {API}/v1/api/catalog/export?url=…&limit=…
+ *    （后端已负责把图片真实内嵌到 Excel）
+ */
 
-(() => {
-  // ===== 小工具 =====
-  const $  = (sel, ctx = document) => ctx.querySelector(sel);
-  const $$ = (sel, ctx = document) => Array.from(ctx.querySelectorAll(sel));
-  const create = (tag, attrs = {}) => {
-    const el = document.createElement(tag);
-    Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
-    return el;
-  };
+(function(){
+  const $ = sel => document.querySelector(sel);
 
-  const getApiBase = () => {
+  // ---- 解析 API Base ----
+  function getApiBase() {
     try {
-      const u = new URL(location.href);
-      return (u.searchParams.get('api') || '').replace(/\/+$/,''); // 去掉尾部/
-    } catch { return ''; }
-  };
-
-  // 在按钮附近、常见选择器、占位符文本中“聪明搜索”URL 输入框
-  const findUrlInput = () => {
-    // 1) 先在按钮邻域找
-    const btn = $('#btnFetch') || $('button[data-role="fetch"]') || $('button');
-    const scopes = [];
-    if (btn) {
-      const box = btn.closest('form, .toolbar, .controls, .row, .flex, .container');
-      if (box) scopes.push(box);
+      const sp = new URLSearchParams(location.search);
+      const raw = sp.get('api') || '';
+      if (!raw) return '';               // 同源
+      // 允许 ?api=https://xxx 或 ?api=xxx（Render 上常见没有协议的写法）
+      const hasProto = /^https?:\/\//i.test(raw);
+      return hasProto ? raw.replace(/\/+$/,'') : `https://${raw.replace(/\/+$/,'')}`;
+    } catch {
+      return '';
     }
-    scopes.push(document);
+  }
+  const API_BASE = getApiBase();
+  $('#envNote').textContent = API_BASE ? `API_BASE：${API_BASE}` : 'API_BASE：同源';
 
-    const candidates = [];
-    const selList = [
-      '#url', '#inputUrl', '#url-input', '[name="url"]', '[data-role="url"]',
-      'input[type="url"]', 'input[type="text"]', 'textarea'
-    ];
-    for (const scope of scopes) {
-      for (const sel of selList) candidates.push(...$$(sel, scope));
-      // 再用 placeholder 语义兜底
-      candidates.push(
-        ...$$('input,textarea', scope).filter(el => {
-          const ph = (el.getAttribute('placeholder') || '').toLowerCase();
-          return /url|http|链接|地址|katalog|list|产品|product/.test(ph);
-        })
-      );
-    }
-    // 过滤不可见/禁用
-    const visible = candidates.filter(el => el && !el.disabled && el.offsetParent !== null);
-    // 选内容最长的那个
-    visible.sort((a,b) => (b.value?.length||0) - (a.value?.length||0));
-    return visible[0] || null;
-  };
+  // ---- 节点 ----
+  const inputUrl   = $('#inputUrl');
+  const btnFetch   = $('#btnFetch');
+  const btnExportT = $('#btnExportTop');
+  const btnExportB = $('#btnExportBottom');
+  const btnClear   = $('#btnClear');
+  const limitSel   = $('#limit');
+  const holder     = $('#holder');
+  const tableWrap  = $('#tableWrap');
+  const tbody      = $('#resultBody');
+  const stat       = $('#stat');
 
-  // ===== UI 元素（延迟到 DOM 就绪再取更稳） =====
-  const els = { url: null, btnFetch: null, pageSize: null, btnExport: null, btnClear: null, dataPanel: null };
+  let lastUrl = '';
+  let lastCount = 0;
 
-  // ===== Toast =====
-  const toastEl = create('div', { id: 'toast', style: 'display:none' });
-  const mountToast = () => {
-    const host = els.dataPanel || $('#data-panel') || document.body;
-    if (!toastEl.parentNode) {
-      toastEl.style.cssText = 'margin:10px 0;padding:8px 12px;border-radius:6px;background:#fff8ee;display:none;';
-      host.prepend(toastEl);
-    }
-  };
-  const toast = (type, msg) => {
-    const color = type === 'ok' ? '#0ea5e9' : '#f59e0b';
-    toastEl.style.cssText =
-      `margin:10px 0;padding:8px 12px;border-left:4px solid ${color};background:#fff8ee;display:block;`;
-    toastEl.textContent = msg;
-  };
+  // ---- 工具 ----
+  function setBusy(busy){
+    [btnFetch, btnExportT, btnExportB, btnClear].forEach(b=> b.disabled = !!busy);
+  }
 
-  // ===== 表格渲染 =====
-  const ensureTbody = () => {
-    let tbody = $('#tbody');
-    if (tbody) return tbody;
+  function showStat(text, ok=true){
+    stat.style.display = 'block';
+    stat.style.background = ok ? '#ecfdf5' : '#fef2f2';
+    stat.style.borderColor = ok ? '#a7f3d0' : '#fecaca';
+    stat.style.color = ok ? '#065f46' : '#991b1b';
+    stat.textContent = text;
+  }
 
-    let table = $('table.data-table') || $('table');
-    if (!table) {
-      table = create('table', {
-        class: 'data-table',
-        style: 'width:100%;border-collapse:collapse;font-size:14px;'
-      });
-      const thead = create('thead');
-      thead.innerHTML = `
-        <tr style="text-align:left;border-bottom:1px solid #eee;">
-          <th style="padding:8px;width:56px">#</th>
-          <th style="padding:8px">Item No.</th>
-          <th style="padding:8px">Picture</th>
-          <th style="padding:8px">Description</th>
-          <th style="padding:8px">MOQ</th>
-          <th style="padding:8px">Unit Price</th>
-          <th style="padding:8px">link</th>
-        </tr>`;
-      tbody = create('tbody', { id: 'tbody' });
-      table.appendChild(thead);
-      table.appendChild(tbody);
-      (els.dataPanel || document.body).appendChild(table);
-    } else {
-      tbody = table.tBodies[0] || create('tbody');
-      if (!tbody.id) tbody.id = 'tbody';
-      if (!table.tBodies.length) table.appendChild(tbody);
-    }
-    return tbody;
-  };
-
-  const render = (rows) => {
-    const tbody = ensureTbody();
-    if (!tbody) return;
-    if (!Array.isArray(rows) || rows.length === 0) {
-      tbody.innerHTML = ''; // 清空留白
+  function renderRows(items){
+    tbody.innerHTML = '';
+    if (!Array.isArray(items) || !items.length){
+      holder.style.display = '';
+      tableWrap.style.display = 'none';
+      holder.textContent = 'ui.no_data';
       return;
     }
-    const html = rows.map((it, i) => {
-      const sku   = it.sku ?? it.itemNo ?? it.code ?? '';
-      const title = it.title ?? it.name ?? '';
-      const img   = it.img
-        ? `<img src="${it.img}" alt="" loading="lazy"
-               style="width:42px;height:42px;object-fit:cover;border:1px solid #eee;border-radius:4px;" />`
-        : '';
-      const price = it.price ?? '';
-      const moq   = it.moq ?? '';
-      const link  = it.url ? `<a href="${it.url}" target="_blank" rel="noopener">link_text</a>` : '';
-      return `
-        <tr style="border-bottom:1px dashed #eee;">
-          <td style="padding:8px">${i + 1}</td>
-          <td style="padding:8px">${sku}</td>
-          <td style="padding:8px">${img}</td>
-          <td style="padding:8px">${title}</td>
-          <td style="padding:8px">${moq}</td>
-          <td style="padding:8px">${price}</td>
-          <td style="padding:8px">${link}</td>
-        </tr>`;
-    }).join('');
-    tbody.innerHTML = html;
-  };
+    holder.style.display = 'none';
+    tableWrap.style.display = '';
 
-  // ===== 抓取 =====
-  const fetchCatalog = async () => {
-    try {
-      // 重新取一遍，防止热替换或 DOM 更新后引用过期
-      els.url = els.url || findUrlInput();
+    items.forEach((it, idx) => {
+      const tr = document.createElement('tr');
 
-      const inputVal = (els.url && (els.url.value || els.url.textContent) || '').trim();
-      if (!inputVal) {
-        toast('fail', '请输入或粘贴一个目录/列表页链接');
-        return;
+      const tdIdx = document.createElement('td');
+      tdIdx.textContent = String(idx+1);
+      tr.appendChild(tdIdx);
+
+      const tdSku = document.createElement('td');
+      tdSku.textContent = it.sku || it.itemNo || '';
+      tr.appendChild(tdSku);
+
+      const tdImg = document.createElement('td');
+      tdImg.className = 'imgCell';
+      if (it.img) {
+        const img = new Image();
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.src = it.img;
+        tdImg.appendChild(img);
+      } else {
+        tdImg.innerHTML = '<span class="muted">—</span>';
       }
+      tr.appendChild(tdImg);
 
-      // 尝试把 paste 进来的 “api=xxx&url=xxx” 形式解析出真正 URL
-      let targetUrl = inputVal;
-      try {
-        const parsed = new URL(inputVal);
-        const u2 = parsed.searchParams.get('url'); // “…?url=https%3A%2F%2Fxxx”
-        if (u2) targetUrl = decodeURIComponent(u2);
-      } catch { /* 不是 URL 对象也没关系 */ }
+      const tdDesc = document.createElement('td');
+      tdDesc.textContent = it.title || it.description || '';
+      tr.appendChild(tdDesc);
 
-      const api = getApiBase();
-      if (!api) {
-        toast('fail', '缺少后端 API 地址：请确保访问链接里有 ?api=... 参数');
-        return;
+      const tdMoq = document.createElement('td');
+      tdMoq.textContent = it.moq || '';
+      tr.appendChild(tdMoq);
+
+      const tdPrice = document.createElement('td');
+      tdPrice.textContent = it.price || '';
+      tr.appendChild(tdPrice);
+
+      const tdLink = document.createElement('td');
+      if (it.url) {
+        const a = document.createElement('a');
+        a.href = it.url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = '链接';
+        tdLink.appendChild(a);
+      } else {
+        tdLink.innerHTML = '<span class="muted">—</span>';
       }
+      tr.appendChild(tdLink);
 
-      const limit = parseInt((els.pageSize && els.pageSize.value) || '50', 10) || 50;
-
-      toast('ok', '正在抓取中…');
-      // 统一到新的后端路径：/v1/api/catalog/parse
-      const res = await fetch(`${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}`);
-      if (!res.ok) {
-        toast('fail', `抓取失败：HTTP ${res.status}`);
-        render([]);
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-
-      if (!data || data.ok === false) {
-        toast('fail', (data && (data.message || data.error)) ? (data.message || data.error) : '抓取失败');
-        render([]);
-        return;
-      }
-
-      const list = data.products || data.items || [];
-      render(list);
-      toast('ok', `抓取成功，共 ${list.length} 条`);
-    } catch (err) {
-      console.error(err);
-      toast('fail', `抓取失败：${err.message || err}`);
-      render([]);
-    }
-  };
-
-  const clearData = () => {
-    render([]);
-    toastEl.style.display = 'none';
-  };
-
-  // ===== 绑定事件（DOMContentLoaded后再取 DOM 更稳） =====
-  const bind = () => {
-    els.btnFetch  = $('#btnFetch')  || $('button[data-role="fetch"]')  || $('button');
-    els.pageSize  = $('#pageSize')  || $('select');
-    els.btnExport = $('#btnExport') || $('button[data-role="export"]');
-    els.btnClear  = $('#btnClear')  || $('button[data-role="clear"]');
-    els.dataPanel = $('#data-panel') || $('.data-panel') || document.querySelector('.panel') || document.body;
-    els.url       = findUrlInput();
-
-    mountToast();
-
-    if (els.btnFetch) els.btnFetch.addEventListener('click', fetchCatalog);
-    if (els.btnClear) els.btnClear.addEventListener('click', clearData);
-    if (els.url)      els.url.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') fetchCatalog();
+      tbody.appendChild(tr);
     });
-  };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bind, { once: true });
-  } else {
-    bind();
   }
+
+  // ---- 调用后端：parse ----
+  async function doFetch(){
+    const url = (inputUrl.value || '').trim();
+    if (!url) {
+      showStat('请输入目录页链接。', false);
+      return;
+    }
+    setBusy(true);
+    showStat('正在抓取中…');
+
+    try{
+      const base = API_BASE || '';
+      const endpoint = `${base}/v1/api/catalog/parse?url=${encodeURIComponent(url)}&limit=${encodeURIComponent(limitSel.value)}`;
+      const res = await fetch(endpoint, { credentials: 'omit' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      // 兼容多种返回结构：{items:[]} 或 {data:{items:[]}} 或 直接 []
+      const items = Array.isArray(data) ? data
+                  : Array.isArray(data.items) ? data.items
+                  : (data.data && Array.isArray(data.data.items)) ? data.data.items
+                  : [];
+
+      renderRows(items);
+      lastUrl = url;
+      lastCount = items.length;
+      showStat(`抓取成功，共 ${lastCount} 条`);
+    }catch(err){
+      console.error('[mvp3] fetch error:', err);
+      renderRows([]);
+      showStat(`抓取失败：${err.message || err}`, false);
+      alert(`抓取失败：${err.message || err}`);
+    }finally{
+      setBusy(false);
+    }
+  }
+
+  // ---- 调用后端：export（由后端内嵌图片）----
+  function doExport(){
+    const url = (inputUrl.value || '').trim();
+    if (!url){
+      showStat('请先输入目录页链接。', false);
+      return;
+    }
+    const base = API_BASE || '';
+    const endpoint = `${base}/v1/api/catalog/export?url=${encodeURIComponent(url)}&limit=${encodeURIComponent(limitSel.value)}`;
+
+    // 采用“打开下载链接”的方式，让浏览器直接下载文件
+    const a = document.createElement('a');
+    a.href = endpoint;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // ---- 清空 ----
+  function doClear(){
+    inputUrl.value = '';
+    tbody.innerHTML = '';
+    holder.style.display = '';
+    tableWrap.style.display = 'none';
+    showStat('已清空。');
+  }
+
+  // ---- 按钮绑定 ----
+  btnFetch.addEventListener('click', doFetch);
+  btnExportT.addEventListener('click', doExport);
+  btnExportB.addEventListener('click', doExport);
+  btnClear.addEventListener('click', doClear);
+
+  // 回车触发抓取
+  inputUrl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doFetch();
+  });
+
+  // 语言按钮（占位）
+  document.querySelectorAll('[data-lang]').forEach(b=>{
+    b.addEventListener('click', ()=> alert('多语言切换占位功能'));
+  });
+
+  // 初始：如果地址栏自带 ?api=… 仅显示绿色提示
+  showStat('部署已就绪：可输入链接抓取；导出按钮会从后端生成内嵌图片的 Excel。', true);
 })();
