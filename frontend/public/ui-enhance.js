@@ -1,131 +1,139 @@
-/* ui-enhance.js — stableB (embed images in Excel + price placeholders)
- * 关键修复点：
- * - 通过后端 /v1/api/image?url=... 拉取 base64；根据图片 URL 后缀强制生成 dataURL（不依赖 content-type）
- * - ExcelJS 在浏览器端只能接收 { base64: 'data:image/...;base64,xxx' }；严禁使用 Node 的 Buffer
- * - 两种锚点方式（单元格范围 / 坐标锚点）双保险插图，失败会自动降级
- * - “Unit Price” 无价时写入占位符 € 0,00
- */
+/* ui-enhance v3.7 — fix Excel image embedding (no Buffer), use backend base64 & fallback proxy */
 
-(() => {
-  // -------------------------- 基础工具 --------------------------
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-  const qs = new URLSearchParams(location.search);
-  const API_BASE = (qs.get('api') || '').replace(/\/$/, ''); // 例如 https://your-backend.onrender.com
+(function () {
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const log = (...args) => {
-    console.log(...args);
-    try {
-      const box = $('#mvp3-log');
-      if (box) {
-        const li = document.createElement('div');
-        li.textContent = args.map(String).join(' ');
-        box.appendChild(li);
-      }
-    } catch (_) {}
-  };
+  const elUrl = $("#input-url");
+  const elFetch = $("#btn-fetch");
+  const elLimit = $("#sel-limit");
+  const elXlsx = $("#btn-xlsx");
+  const elClear = $("#btn-clear");
+  const elStat = $("#stat");
+  const tbl = $("#tbl");
+  const tbody = $("#tbody");
+  const empty = $("#empty");
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // 通过 ?api=... 指定后端；否则默认同域根（便于本地）
+  const apiBase = new URLSearchParams(location.search).get("api")?.replace(/\/+$/, "") || "";
 
-  // 根据 url 猜测 mime；不要依赖响应头
-  function guessMimeFromUrl(url) {
-    const u = String(url).split('?')[0].toLowerCase();
-    if (u.endsWith('.png')) return 'image/png';
-    if (u.endsWith('.webp')) return 'image/webp';
-    if (u.endsWith('.gif')) return 'image/gif';
-    // 默认 jpg/jpeg
-    return 'image/jpeg';
+  let products = [];  // 当前数据
+
+  function langFromHeader(rsp) {
+    try { return rsp.headers.get("X-Lang") || "de"; } catch { return "de"; }
   }
 
-  // 从后端代理取 base64 文本，并拼 dataURL
-  async function fetchImageBase64DataURL(url) {
-    if (!API_BASE) throw new Error('API base is not set. Append ?api=<backend> in URL.');
-    const endpoint = `${API_BASE}/v1/api/image?url=${encodeURIComponent(url)}`;
-    log('[xlsx] fetch image via proxy:', endpoint);
-
-    const resp = await fetch(endpoint, { method: 'GET', mode: 'cors' });
-    if (!resp.ok) throw new Error(`image proxy ${resp.status} ${resp.statusText}`);
-
-    // 后端按 text/plain 返回纯 base64
-    const pureB64 = (await resp.text()).trim();
-    const mime = guessMimeFromUrl(url);
-    // 统一拼成 dataURL
-    return `data:${mime};base64,${pureB64}`;
+  function setStat(text) {
+    elStat.textContent = text;
   }
 
-  // 千分位/欧元占位
-  const formatEUR = (n) => {
-    try {
-      return new Intl.NumberFormat('de-DE', {
-        style: 'currency',
-        currency: 'EUR',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(Number(n) || 0);
-    } catch {
-      // 兜底字符串
-      return '€ 0,00';
+  function setBusy(b) {
+    elFetch.disabled = b;
+    elXlsx.disabled = b || products.length === 0;
+  }
+
+  function ensureApi() {
+    if (!apiBase) {
+      alert("请通过 ?api= 后端地址 访问此页，例如：/?api=https://<你的后端域名>");
+      throw new Error("missing api base");
     }
-  };
+  }
 
-  // -------------------------- 渲染表格（页面预览） --------------------------
-  function renderTable(products) {
-    const tbody = $('#mvp3-tbody');
-    tbody.innerHTML = '';
-    products.forEach((p, i) => {
-      const tr = document.createElement('tr');
+  async function fetchJson(url) {
+    const rsp = await fetch(url, { credentials: "omit" });
+    if (!rsp.ok) throw new Error(`HTTP ${rsp.status}`);
+    const lang = langFromHeader(rsp);
+    const data = await rsp.json();
+    return { data, lang };
+  }
 
-      // #
-      const tdIdx = document.createElement('td');
-      tdIdx.textContent = String(i + 1);
-      tr.appendChild(tdIdx);
+  // 解析 & 预览
+  async function doFetch() {
+    try {
+      ensureApi();
+      setBusy(true);
 
-      // Item No.
-      const tdSku = document.createElement('td');
-      tdSku.textContent = p.sku || '—';
-      tr.appendChild(tdSku);
+      const listUrl = (elUrl.value || "").trim();
+      const limit = parseInt(elLimit.value, 10) || 50;
 
-      // Picture (页面预览用 <img>)
-      const tdImg = document.createElement('td');
-      if (p.img) {
-        const img = document.createElement('img');
-        img.src = p.img;
-        img.alt = '';
-        img.width = 76;
-        img.height = 56;
-        img.referrerPolicy = 'no-referrer';
-        tdImg.appendChild(img);
-      } else {
-        tdImg.textContent = '—';
+      if (!listUrl) {
+        alert("请输入目录页 URL");
+        return;
       }
-      tr.appendChild(tdImg);
 
-      // Description
-      const tdTitle = document.createElement('td');
-      tdTitle.textContent = p.title || '—';
+      // 让后端直接把前 limit 张图片转成 base64 返回（字段：img_b64）
+      const url =
+        `${apiBase}/v1/api/catalog/parse` +
+        `?url=${encodeURIComponent(listUrl)}` +
+        `&limit=${limit}` +
+        `&enrich=true` +
+        `&img=base64&imgCount=${limit}`;
+
+      const { data } = await fetchJson(url);
+      if (!data || !data.ok) throw new Error(data?.error || "解析失败");
+
+      products = Array.isArray(data.items) ? data.items : (data.products || []);
+      const total = data.count || products.length || 0;
+
+      setStat(`抓取成功：共 ${total} 条（预览前 ${Math.min(total, 50)} 条）`);
+      renderTable(products.slice(0, Math.min(products.length, 50)));
+    } catch (e) {
+      console.error("[mvp3] fetch error:", e);
+      alert(`抓取失败：${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function renderTable(list) {
+    if (!list || list.length === 0) {
+      tbl.style.display = "none";
+      empty.style.display = "";
+      empty.textContent = "ui.no_data";
+      return;
+    }
+    empty.style.display = "none";
+    tbl.style.display = "";
+
+    tbody.innerHTML = "";
+    list.forEach((it, i) => {
+      const tr = document.createElement("tr");
+
+      const tdNo = document.createElement("td");
+      tdNo.textContent = String(i + 1);
+      tr.appendChild(tdNo);
+
+      const tdPic = document.createElement("td");
+      const img = document.createElement("img");
+      img.className = "thumb";
+      // 列表中为避免跨域，走后端图片代理（不是 base64）
+      if (it.img) {
+        const proxied = `${apiBase}/v1/api/image?url=${encodeURIComponent(it.img)}`;
+        img.src = proxied;
+      }
+      tdPic.appendChild(img);
+      tr.appendChild(tdPic);
+
+      const tdTitle = document.createElement("td");
+      tdTitle.textContent = it.title || "";
       tr.appendChild(tdTitle);
 
-      // MOQ（目前很多站点无此字段，先占位）
-      const tdMoq = document.createElement('td');
-      tdMoq.textContent = p.moq || '—';
+      const tdMoq = document.createElement("td");
+      tdMoq.textContent = it.moq || "—";
       tr.appendChild(tdMoq);
 
-      // Unit Price（无价 → 占位 € 0,00）
-      const tdPrice = document.createElement('td');
-      tdPrice.textContent = p.price || formatEUR(0);
+      const tdPrice = document.createElement("td");
+      tdPrice.textContent = it.price || "—";
       tr.appendChild(tdPrice);
 
-      // Link
-      const tdLink = document.createElement('td');
-      if (p.url) {
-        const a = document.createElement('a');
-        a.href = p.url;
-        a.target = '_blank';
-        a.rel = 'noreferrer';
-        a.textContent = '链接';
+      const tdLink = document.createElement("td");
+      if (it.url) {
+        const a = document.createElement("a");
+        a.href = it.url; a.target = "_blank"; a.rel = "noreferrer";
+        a.textContent = "链接";
         tdLink.appendChild(a);
       } else {
-        tdLink.textContent = '—';
+        tdLink.textContent = "—";
       }
       tr.appendChild(tdLink);
 
@@ -133,139 +141,139 @@
     });
   }
 
-  // -------------------------- 抓取目录 --------------------------
-  async function doFetch() {
-    const url = ($('#mvp3-input') || {}).value?.trim();
-    if (!url) {
-      alert('请输入目录/列表页链接');
-      return;
-    }
-    if (!API_BASE) {
-      alert('URL 缺少 ?api= 后端地址，无法抓取。');
-      return;
-    }
-
-    $('#mvp3-action').disabled = true;
-    try {
-      log('[mvp3] action: fetch');
-
-      const viewN = Number($('#mvp3-limit').value || 50) || 50;
-      const parseUrl = `${API_BASE}/v1/api/parse?url=${encodeURIComponent(url)}&limit=${viewN}`;
-      const resp = await fetch(parseUrl, { method: 'GET', mode: 'cors' });
-      const data = await resp.json();
-
-      if (!data || !data.ok) throw new Error('解析失败');
-      // 统一字段：sku/title/url/img/price/moq
-      const list = Array.isArray(data.items || data.products) ? (data.items || data.products) : [];
-
-      // 页面展示：无价 → 占位符
-      list.forEach((x) => {
-        if (!x.price) x.price = formatEUR(0);
-      });
-
-      renderTable(list);
-      $('#mvp3-count').textContent = `抓取成功：共 ${list.length} 条（预览前 ${viewN} 条）`;
-      window.__MVP3_LAST = list;
-    } catch (e) {
-      console.error(e);
-      alert('抓取失败：' + e.message);
-    } finally {
-      $('#mvp3-action').disabled = false;
-    }
+  // small helper: 解析 dataURL 的扩展名（缺省 jpeg）
+  function extFromDataUrl(dataUrl) {
+    const m = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(dataUrl || "");
+    if (!m) return "jpeg";
+    const mime = m[1].toLowerCase();
+    if (mime.includes("png")) return "png";
+    if (mime.includes("gif")) return "gif";
+    if (mime.includes("webp")) return "webp";
+    if (mime.includes("bmp")) return "bmp";
+    if (mime.includes("svg")) return "svg";
+    return "jpeg";
   }
 
-  // -------------------------- 导出 Excel（含图片 + 价格占位） --------------------------
-  async function doExport() {
-    const rows = window.__MVP3_LAST || [];
-    if (!rows.length) {
-      alert('没有可导出的数据');
-      return;
+  // fallback：如果列表里没有 img_b64，就临时向后端要一份 base64
+  async function ensureBase64(it) {
+    if (it.img_b64) return it.img_b64;
+    if (!it.img) return "";
+
+    try {
+      const url = `${apiBase}/v1/api/image64?url=${encodeURIComponent(it.img)}`;
+      const { data } = await fetchJson(url);
+      if (data && data.ok && data.base64) {
+        it.img_b64 = data.base64;
+        return data.base64;
+      }
+    } catch (e) {
+      console.warn("[img64] convert failed:", it.img, e);
     }
-    if (!window.ExcelJS) {
-      alert('ExcelJS 未加载（typeof ExcelJS 不是 object）');
-      return;
-    }
+    return "";
+  }
 
-    log('[mvp3] action: export');
+  // 导出 Excel（带内嵌图片）
+  async function exportXlsx() {
+    try {
+      if (!products || products.length === 0) {
+        alert("没有可导出的数据");
+        return;
+      }
+      setBusy(true);
 
-    const ExcelJS = window.ExcelJS;
-    const wb = new ExcelJS.Workbook();
-    wb.creator = 'MVP3';
-    wb.created = new Date();
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("catalog");
 
-    const ws = wb.addWorksheet('catalog');
-    // 列设置
-    ws.columns = [
-      { header: 'Item No.', key: 'sku', width: 16 },
-      { header: 'Picture', key: 'picture', width: 12 },
-      { header: 'Description', key: 'title', width: 64 },
-      { header: 'MOQ', key: 'moq', width: 9 },
-      { header: 'Unit Price', key: 'price', width: 14 },
-      { header: 'Link', key: 'link', width: 12 }
-    ];
+      // 列
+      ws.columns = [
+        { header: "#", key: "idx", width: 6 },
+        { header: "Picture", key: "pic", width: 14 },
+        { header: "Description", key: "title", width: 60 },
+        { header: "MOQ", key: "moq", width: 12 },
+        { header: "Unit Price", key: "price", width: 16 },
+        { header: "Link", key: "link", width: 12 },
+      ];
 
-    // 行高：第一行表头 + 数据行（配合图片）
-    ws.getRow(1).height = 22;
-
-    // 先写文本，再插图
-    rows.forEach((p, idx) => {
-      const row = ws.addRow({
-        sku: p.sku || '',
-        picture: '', // 图片列先留空
-        title: p.title || '',
-        moq: p.moq || '',
-        price: p.price || formatEUR(0),
-        link: p.url ? '链接' : ''
+      // 行数据
+      products.forEach((it, i) => {
+        ws.addRow({
+          idx: i + 1,
+          pic: "", // 图片稍后插入
+          title: it.title || "",
+          moq: it.moq || "",
+          price: it.price || "",
+          link: "链接",
+        });
       });
 
-      // 超链接
-      if (p.url) {
-        const cell = row.getCell('link');
-        cell.value = { text: '链接', hyperlink: p.url };
-        cell.font = { color: { argb: 'FF0563C1' }, underline: true };
+      // 给“链接”列加超链接
+      products.forEach((it, i) => {
+        const cell = ws.getCell(i + 2, 6); // 第 2 行开始，第 6 列
+        if (it.url) {
+          cell.value = { text: "链接", hyperlink: it.url, tooltip: it.url };
+          cell.font = { color: { argb: "FF1D4ED8" }, underline: true };
+        } else {
+          cell.value = "";
+        }
+      });
+
+      // 行高为图片预留空间
+      for (let r = 2; r <= products.length + 1; r++) {
+        ws.getRow(r).height = 52;
       }
 
-      // 数据行高度（为缩略图留空间）
-      const r = row.number;
-      ws.getRow(r).height = 56;
-    });
+      // 逐条插入图片（异步并发控制）
+      const concurrency = 6;
+      let idx = 0;
+      async function worker() {
+        while (idx < products.length) {
+          const i = idx++;
+          const it = products[i];
+          const base64 = await ensureBase64(it);
+          if (!base64) continue;
 
-    // 插图（顺序 await，避免并发过多）
-    for (let i = 0; i < rows.length; i++) {
-      const r = i + 2; // 数据从第 2 行开始
-      const p = rows[i];
-      if (!p.img) continue;
+          const ext = extFromDataUrl(base64);
+          const imgId = wb.addImage({ base64, extension: ext });
 
-      try {
-        const dataUrl = await fetchImageBase64DataURL(p.img);
-        const imgId = wb.addImage({ base64: dataUrl });
-
-        // 优先尝试：单元格范围（把图塞进 B 列这个格）
-        try {
-          ws.addImage(imgId, `B${r}:B${r}`);
-        } catch (e) {
-          // 降级：坐标锚点（微调一下位置和大小）
-          const col = 2; // B 列
-          const row = r;
+          // 放在第 i+2 行、第 2 列（B）的位置；约 46x46 px
           ws.addImage(imgId, {
-            tl: { col: col - 0.5, row: row - 0.8 },
-            ext: { width: 76, height: 56 }
+            tl: { col: 1 + 0.15, row: i + 1 + 0.2 }, // B 列偏移一点
+            ext: { width: 46, height: 46 },
+            editAs: "oneCell",
           });
         }
-      } catch (err) {
-        console.warn('[xlsx] embed image failed:', p.img, err?.message || err);
       }
-    }
+      await Promise.all(Array.from({ length: concurrency }, worker));
 
-    // 触发下载
-    const buf = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const a = document.createElement('a');
-    a.download = `catalog-preview-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`;
-    a.href = URL.createObjectURL(blob);
-    a.click();
-    URL.revokeObjectURL(a.href);
-    log('已导出 Excel（含图片、价格占位符）');
+      // 导出
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const name = `catalog-${Date.now()}.xlsx`;
+      saveAs(blob, name);
+    } catch (e) {
+      console.error("[xlsx] export error:", e);
+      alert(`导出失败：${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  // -------------------------- 事件绑定 &
+  function clearAll() {
+    products = [];
+    tbody.innerHTML = "";
+    tbl.style.display = "none";
+    empty.style.display = "";
+    empty.textContent = "ui.no_data";
+    setStat("抓取成功：共 0 条（预览前 50 条）");
+  }
+
+  // 事件
+  elFetch.addEventListener("click", doFetch);
+  elXlsx.addEventListener("click", exportXlsx);
+  elClear.addEventListener("click", clearAll);
+
+  // 初始可用态
+  setBusy(false);
+})();
