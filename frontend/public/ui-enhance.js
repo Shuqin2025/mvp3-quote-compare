@@ -1,7 +1,7 @@
-/* public/ui-enhance.js — 强力接管 + ExcelJS 导出（含图片代理与价格占位符） */
+/* public/ui-enhance.js — HOTFIX: 移除 MutationObserver 死循环；Excel 导出含图片与价格占位符 */
 
 (() => {
-  // ---- 轻量 Buffer polyfill（防止第三方逻辑误用）----
+  // ---- 防止第三方脚本用到 Node Buffer 报错（非必须，但安全）----
   if (typeof window.Buffer === 'undefined') {
     window.Buffer = {
       from: (data, enc) => {
@@ -9,7 +9,7 @@
           const bin = atob(data);
           const out = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-          return out; // Uint8Array 足够多数库读取
+          return out;
         }
         throw new Error('Unsupported encoding: ' + enc);
       },
@@ -33,16 +33,23 @@
     } catch { return ''; }
   };
 
-  // ---- UI 元素 & 提示 ----
+  // ---- UI & Toast ----
   const els = { url:null, limit:null, previewBox:null, table:null, tbody:null, toast:null };
 
   function hookUI(){
+    // 输入框
     els.url = $('input[placeholder*="目录"], input[placeholder*="页面"], textarea[placeholder*="目录"]') || $('input,textarea');
-    els.limit = $$('select').find(s => true) || null;
-    if (els.limit) {
-      els.limit.innerHTML = [50,100,200].map(v => `<option value="${v}">${v}</option>`).join('');
-      els.limit.value = '50';
+
+    // 下拉（只打一次补丁）
+    const sel = $$('select').find(s => true);
+    if (sel && !sel.dataset.mvp3Patched) {
+      sel.innerHTML = [50,100,200].map(v => `<option value="${v}">${v}</option>`).join('');
+      sel.value = '50';
+      sel.dataset.mvp3Patched = '1';
     }
+    els.limit = sel || null;
+
+    // 预览容器
     els.previewBox = $$('div,section,main,article').find(d => (d.textContent||'').includes('ui.no_data')) || document.body;
   }
 
@@ -111,7 +118,6 @@
     }).join('');
   }
 
-  // ---- 健康探测（可选）----
   async function probeHealth(api){
     const cs = ['/api/health','/health','/api/healthz','/healthz'];
     for (const p of cs) { try { const r = await fetch(api.replace(/\/$/,'') + p); if (r.ok) return; } catch {} }
@@ -129,9 +135,9 @@
 
       const limit = parseInt((els.limit && els.limit.value) || '50',10)||50;
       const enrichCount = Math.min(limit, 50);
-      toast('ok','正在抓取中…'); probeHealth(api);
+      toast('ok','正在抓取中…'); probeHealth(getApiBase());
 
-      const url = `${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}&enrich=true&enrichCount=${enrichCount}`;
+      const url = `${getApiBase()}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}&enrich=true&enrichCount=${enrichCount}`;
       const res = await fetch(url);
       if(!res.ok){ clearData(); return toast('fail', `抓取失败：HTTP ${res.status}`); }
       const data = await res.json().catch(()=> ({}));
@@ -235,38 +241,20 @@
     toast('ok','已导出 Excel（含图片、价格占位符）');
   }
 
-  // ---- 全局委托：强力接管三个按钮（捕获阶段 + 阻断）----
+  // ---- 全局捕获：强力接管三个按钮 ----
   function delegateClick(e){
     const t = e.target.closest('button, a, [role="button"], input[type=button], input[type=submit]');
     if (!t) return;
-
     const text = (t.innerText || t.textContent || '').trim();
-    // 导出
-    if (/导出\s*Excel/i.test(text)) {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      exportExcel(); return;
-    }
-    // 抓取
-    if (/抓取目录|抓取/i.test(text)) {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      fetchCatalog(); return;
-    }
-    // 清空
-    if (/清空数据|清空/i.test(text)) {
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
-      clearData(); return;
-    }
+    if (/导出\s*Excel/i.test(text)) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); exportExcel(); return; }
+    if (/抓取目录|抓取/i.test(text))   { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); fetchCatalog(); return; }
+    if (/清空数据|清空/i.test(text))   { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); clearData();   return; }
   }
 
   function start(){
     hookUI(); ensureToast(); ensureTable(); clearData();
-    // 全局捕获
-    document.addEventListener('click', delegateClick, true);
-    // Enter 快捷
+    document.addEventListener('click', delegateClick, true);      // 捕获阶段，阻断骨架旧逻辑
     els.url && els.url.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); fetchCatalog(); } });
-    // 防重渲染丢失：观察 DOM 变化，保持 limit 选项
-    const mo = new MutationObserver(()=> hookUI());
-    mo.observe(document.documentElement, { childList:true, subtree:true });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once:true });
