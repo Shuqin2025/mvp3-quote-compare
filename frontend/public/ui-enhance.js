@@ -1,7 +1,8 @@
 /* MVP3 ui-enhance.js (browser) - 2025-09-15 stableB
- * - Embed images into Excel via Base64 (no Buffer in browser)
- * - Price placeholder when missing (€ 0,00)
- * - Gentle ItemNo fallback from URL (optional)
+ * - Excel 导出嵌入图片（ExcelJS）
+ * - 兼容 catalog/parse 与 parse 两种后端
+ * - 通过 {API}/v1/api/image 代理取图，避免 CORS
+ * - 轻量 UI 恢复到简洁白卡样式
  */
 
 (() => {
@@ -9,34 +10,90 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  /** ---------- config / refs ---------- */
+  /** ---------- config ---------- */
   const API_BASE = new URLSearchParams(location.search).get('api') || '';
+
+  /** ---------- build UI skeleton if needed ---------- */
+  function ensureLayout() {
+    // 如果你的 React 已渲染完整 UI，这里什么都不做；
+    // 如果是占位骨架/空白页，就注入一个简洁布局（与截图一致）。
+    if ($('#mvp3-shell')) return;
+
+    const root = $('#root') || document.body;
+    const shell = document.createElement('div');
+    shell.id = 'mvp3-shell';
+    shell.innerHTML = `
+      <div class="container">
+        <div id="langSwitcher" style="display:flex;gap:8px;margin:6px 0 12px">
+          <button class="btn">中文</button>
+          <button class="btn">DE</button>
+          <button class="btn">EN</button>
+        </div>
+
+        <h1 style="margin:8px 0 4px;font-size:24px;font-weight:700">云贸星 智能表格生成器</h1>
+        <div style="color:#6b7280;margin-bottom:8px">输入目录型网页链接，秒生成 Excel 产品表格。</div>
+
+        <div class="tool-row" style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+          <input id="input-url" class="url-input" placeholder="在此粘贴目录型页面链接（例如某一类目的商品列表页）" />
+          <button id="btn-fetch" class="btn primary">抓取目录</button>
+          <select id="sel-limit" class="btn">
+            <option>50</option><option>100</option><option>200</option>
+          </select>
+          <button id="btn-export" class="btn">导出 Excel（.xlsx）</button>
+          <button id="btn-clear" class="btn">清空数据</button>
+        </div>
+
+        <div class="alert alert-amber" id="js-tip">这是页面骨架的占位提示（无脚本、无接口），用于验证部署是否稳定。</div>
+        <div class="alert alert-green" id="js-export-tip" style="display:none">已导出 Excel（含图片、价格占位符）。</div>
+
+        <div class="placeholder" style="background:#fff;border:1px solid #e5e7eb;border-radius:10px">
+          <table class="grid" style="width:100%;border-collapse:collapse" id="mvp3-table">
+            <thead>
+              <tr>
+                <th style="width:48px">#</th>
+                <th style="width:140px">Item No.</th>
+                <th style="width:160px">Picture</th>
+                <th>Description</th>
+                <th style="width:100px">MOQ</th>
+                <th style="width:120px">Unit Price</th>
+                <th style="width:100px">Link</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="ft" style="color:#666;margin-top:12px;display:flex;gap:16px">
+          <a href="#" style="color:#2563eb;text-decoration:none">支持的网站</a>
+          <a href="#" style="color:#2563eb;text-decoration:none">隐私政策</a>
+          <a href="#" style="color:#2563eb;text-decoration:none">联系我们</a>
+        </div>
+      </div>
+    `;
+    root.appendChild(shell);
+  }
+
+  ensureLayout();
+
+  /** ---------- refs ---------- */
   const els = {
     url: $('input[type="text"], #url, #input-url') || $('input'),
-    btnFetch: $$('button').find(b => /抓取目录/.test(b.textContent)) || $('button[data-action="fetch"]'),
-    btnExport: $$('button').find(b => /导出\s*Excel/.test(b.textContent)) || $('button[data-action="export"]'),
-    selectLimit: $$('select').find(s => /预览/.test(s.parentElement?.textContent || '') || /预览/.test(s.title || '')) || $('select'),
-    tableBody: $('table tbody') || $('tbody'),
-    tip: $('.alert.alert-warning, .js-tip') || null,
-    tipExport: $('.alert.alert-info, .js-export-tip') || null,
+    btnFetch: $('#btn-fetch') || $$('button').find(b => /抓取目录/.test(b.textContent)),
+    btnExport: $('#btn-export') || $$('button').find(b => /导出\s*Excel/.test(b.textContent)),
+    btnClear:  $('#btn-clear')  || $$('button').find(b => /清空/.test(b.textContent)),
+    selectLimit: $('#sel-limit') || $('select'),
+    tableBody: $('#mvp3-table tbody') || $('table tbody'),
+    tip: $('#js-tip'),
+    tipExport: $('#js-export-tip'),
   };
 
   /** ---------- state ---------- */
-  let currentData = []; // 标准化后的列表，既用于渲染，也用于导出
+  let currentData = [];
 
   /** ---------- utils ---------- */
   const priceOrPlaceholder = (p) => (!p || (typeof p === 'string' && !p.trim())) ? '€ 0,00' : p;
-
-  // 看起来像编号：纯数字，或数字-数字
   const isCodeLike = (s) => /^\s*\d+(?:-\d+)*\s*$/.test(String(s || ''));
-
-  // 从 url 尾部提取 id，例如 .../xxx,21,80.html -> 80
-  const idFromUrl = (u = '') => {
-    const m = /,(\d+)\.html(?:[?#].*)?$/i.exec(u);
-    return m ? m[1] : '';
-  };
-
-  // 规范化 ItemNo：优先后端的 sku；不行用 URL 里的尾号；否则留空
+  const idFromUrl = (u = '') => { const m = /,(\d+)\.html(?:[?#].*)?$/i.exec(u); return m ? m[1] : ''; };
   const normalizeItemNo = (item) => {
     const sku = (item.sku ?? '').toString().trim();
     if (isCodeLike(sku)) return sku;
@@ -44,16 +101,12 @@
     if (isCodeLike(fromUrl)) return fromUrl;
     return '';
   };
-
-  // 从 URL 猜测图片扩展名；ExcelJS 需要 png/jpeg/gif/webp 等
   const extFromUrl = (u = '') => {
     const m = /\.([a-z0-9]+)(?:[?#].*)?$/i.exec(u);
     let ext = (m?.[1] || 'jpg').toLowerCase();
     if (ext === 'jpg') ext = 'jpeg';
     return ext;
   };
-
-  // ArrayBuffer -> base64（分片，避免 call stack 爆）
   const ab2b64 = (buf) => {
     const bytes = new Uint8Array(buf);
     const chunk = 0x8000;
@@ -64,21 +117,20 @@
     return btoa(binary);
   };
 
-  // 通过后端代理，把图片取回并转成 dataURL base64
   async function fetchImageBase64(imgUrl) {
+    // 你的后端图片代理：/v1/api/image?url=...（如无此路由，请按文末“后端补丁”添加）
     const proxy = `${API_BASE}/v1/api/image?url=${encodeURIComponent(imgUrl)}`;
     const res = await fetch(proxy, { mode: 'cors' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = await res.arrayBuffer();
     if (buf.byteLength === 0) throw new Error('empty image');
-    const ext = extFromUrl(imgUrl);               // e.g. jpeg/png/webp
+    const ext = extFromUrl(imgUrl);
     const base64 = ab2b64(buf);
-    // ExcelJS 支持 { base64, extension }，这里同时附带 dataURL 头更清晰
     const dataURL = `data:image/${ext};base64,${base64}`;
     return { dataURL, ext };
   }
 
-  /** ---------- render table ---------- */
+  /** ---------- render ---------- */
   function renderTable(items) {
     currentData = items.map((x, i) => ({
       idx: i + 1,
@@ -109,47 +161,55 @@
     }
   }
 
-  /** ---------- fetch catalog ---------- */
+  /** ---------- api: parse (with fallback) ---------- */
+  async function parseCatalog(url, limit) {
+    // 先试 /v1/api/catalog/parse（你截图里的路径），失败再试 /v1/api/parse
+    const endpoints = [
+      `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}`,
+      `${API_BASE}/v1/api/parse?url=${encodeURIComponent(url)}&limit=${limit}`,
+    ];
+    let lastErr;
+    for (const ep of endpoints) {
+      try {
+        const r = await fetch(ep, { method: 'GET', mode: 'cors' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        const list = Array.isArray(j?.items) && j.items.length
+          ? j.items
+          : (Array.isArray(j?.products) ? j.products : []);
+        if (list.length || j) return list;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('parse failed');
+  }
+
+  /** ---------- actions ---------- */
   async function fetchCatalog() {
     try {
       const url = (els.url?.value || '').trim();
       if (!url) return;
       const limit = parseInt(els.selectLimit?.value || '50', 10) || 50;
 
-      console.log('[mvp3] action: fetch', url, { limit });
-      const resp = await fetch(`${API_BASE}/v1/api/parse?url=${encodeURIComponent(url)}&limit=${limit}`, {
-        method: 'GET',
-        mode: 'cors',
-      });
-      const json = await resp.json();
-
-      // 后端既可能给 products，也可能给 items；优先 items
-      const list = Array.isArray(json?.items) && json.items.length
-        ? json.items
-        : (Array.isArray(json?.products) ? json.products : []);
-
+      const list = await parseCatalog(url, limit);
       renderTable(list);
 
       const okMsg = `抓取成功：共 ${list.length} 条（预览前 ${Math.min(list.length, limit)} 条）`;
-      els.tip && (els.tip.textContent = okMsg);
+      if (els.tip) { els.tip.textContent = okMsg; els.tip.style.display = 'block'; }
     } catch (err) {
       console.error('[mvp3] fetch error', err);
       alert('抓取失败：' + (err?.message || err));
     }
   }
 
-  /** ---------- export to excel ---------- */
   async function exportExcel() {
-    if (!window.ExcelJS) {
-      alert('ExcelJS 未加载');
-      return;
-    }
+    if (!window.ExcelJS) { alert('ExcelJS 未加载'); return; }
     const ExcelJS = window.ExcelJS;
 
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Catalog');
 
-    // 列定义
     ws.columns = [
       { header: 'Item No.',   key: 'sku',   width: 18 },
       { header: 'Picture',    key: 'pic',   width: 22 },
@@ -160,7 +220,6 @@
     ];
     ws.getRow(1).font = { bold: true };
 
-    // 先写文本，再插入图片（行高稍微大一些方便缩略图）
     const rowsMeta = [];
     for (const row of currentData) {
       const r = ws.addRow({
@@ -175,31 +234,25 @@
       rowsMeta.push({ excelRow: r.number, img: row.img });
     }
 
-    // 逐行嵌入图片（稳妥起见串行；如需更快可做小并发队列）
+    // 串行嵌图（稳定），需要更快可做并发控制
     for (const meta of rowsMeta) {
       const imgUrl = meta.img;
       if (!imgUrl) continue;
-
       try {
         const { dataURL, ext } = await fetchImageBase64(imgUrl);
         const imgId = wb.addImage({ base64: dataURL, extension: ext });
-
-        // Picture 列是第 2 列（B 列）；anchor 使用 0-based col/row
-        const rowIdx0 = meta.excelRow - 1;
+        const rowIdx0 = meta.excelRow - 1; // 0-based
         ws.addImage(imgId, {
-          tl:  { col: 1, row: rowIdx0 },  // B列
+          tl:  { col: 1, row: rowIdx0 },  // B 列（Picture）
           ext: { width: 120, height: 70 },
           editAs: 'oneCell',
         });
-
-        console.log('[xlsx] embed image ok:', imgUrl);
       } catch (err) {
         console.warn('[xlsx] embed image failed:', imgUrl, err?.message || err);
       }
     }
 
-    // 下载 xlsx
-    const filename = `catalog-preview-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now()}.xlsx`;
+    const filename = `catalog-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now()}.xlsx`;
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const a = document.createElement('a');
@@ -210,18 +263,20 @@
     URL.revokeObjectURL(a.href);
     a.remove();
 
-    els.tipExport && (els.tipExport.textContent = '已导出 Excel（含图片、价格占位符）');
-    console.log('[mvp3] action: export', filename);
+    if (els.tipExport) { els.tipExport.style.display = 'block'; }
+  }
+
+  function clearData() {
+    currentData = [];
+    if (els.tableBody) els.tableBody.innerHTML = '';
+    if (els.tip) els.tip.textContent = 'ui_no_data';
   }
 
   /** ---------- bind ---------- */
   els?.btnFetch?.addEventListener('click', fetchCatalog);
   els?.btnExport?.addEventListener('click', exportExcel);
-
-  // 输入框回车触发抓取
-  els?.url?.addEventListener?.('keydown', (e) => {
-    if (e.key === 'Enter') fetchCatalog();
-  });
+  els?.btnClear?.addEventListener('click', clearData);
+  els?.url?.addEventListener?.('keydown', (e) => { if (e.key === 'Enter') fetchCatalog(); });
 
   // 健康检查（非阻塞）
   (async () => { try { await fetch(`${API_BASE}/health`, { mode: 'cors' }); } catch {} })();
