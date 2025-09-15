@@ -1,10 +1,13 @@
-// app-simple.js — single UI + i18n + image-embed Excel (2025-09-16)
+// app-simple.js — single UI + i18n + image-embed Excel
+// (2025-09-16, default API fallback so domain works without ?api=...)
 
 (() => {
-
   const $ = (s, r=document) => r.querySelector(s);
-  const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-  const API_BASE = new URLSearchParams(location.search).get('api') || '';
+
+  // Default backend so the app works without ?api=...
+  const API_DEFAULT = 'https://yunivera-mvp2-cwyr.onrender.com';
+  const apiParam = new URLSearchParams(location.search).get('api');
+  const API_BASE = (apiParam && /^https?:\/\//i.test(apiParam)) ? apiParam : API_DEFAULT;
 
   // ─────────── i18n ───────────
   const i18n = {
