@@ -1,5 +1,7 @@
 // app-simple.js — single UI + i18n + image-embed Excel (2025-09-16)
+
 (() => {
+
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
   const API_BASE = new URLSearchParams(location.search).get('api') || '';
@@ -13,7 +15,7 @@
       fetch: '抓取目录',
       export: '导出 Excel（.xlsx）',
       clear: '清空数据',
-      th: ['#','Item No.','Picture','Description','MOQ','Unit Price','Link'],
+      th: ['#','货号','图片','描述','起订量','单价','链接'],
       okExport: '已导出 Excel（含图片、价格占位符）。',
       success: (n, m) => `抓取成功：共 ${n} 条（预览前 ${m} 条）`,
       pleaseFetch: '请先抓取目录再导出。',
@@ -230,4 +232,5 @@
 
   // 轻量健康检查（不阻塞）
   (async () => { try { await fetch(`${API_BASE}/health`, { mode: 'cors' }); } catch {} })();
+
 })();
