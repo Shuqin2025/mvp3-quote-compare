@@ -1,279 +1,228 @@
-/* ui-enhance v3.7 — fix Excel image embedding (no Buffer), use backend base64 & fallback proxy */
+/* MVP3 ui-enhance.js (browser) - 2025-09-15 stableB
+ * - Embed images into Excel via Base64 (no Buffer in browser)
+ * - Price placeholder when missing (€ 0,00)
+ * - Gentle ItemNo fallback from URL (optional)
+ */
 
-(function () {
+(() => {
+  /** ---------- tiny dom helpers ---------- */
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const elUrl = $("#input-url");
-  const elFetch = $("#btn-fetch");
-  const elLimit = $("#sel-limit");
-  const elXlsx = $("#btn-xlsx");
-  const elClear = $("#btn-clear");
-  const elStat = $("#stat");
-  const tbl = $("#tbl");
-  const tbody = $("#tbody");
-  const empty = $("#empty");
+  /** ---------- config / refs ---------- */
+  const API_BASE = new URLSearchParams(location.search).get('api') || '';
+  const els = {
+    url: $('input[type="text"], #url, #input-url') || $('input'),
+    btnFetch: $$('button').find(b => /抓取目录/.test(b.textContent)) || $('button[data-action="fetch"]'),
+    btnExport: $$('button').find(b => /导出\s*Excel/.test(b.textContent)) || $('button[data-action="export"]'),
+    selectLimit: $$('select').find(s => /预览/.test(s.parentElement?.textContent || '') || /预览/.test(s.title || '')) || $('select'),
+    tableBody: $('table tbody') || $('tbody'),
+    tip: $('.alert.alert-warning, .js-tip') || null,
+    tipExport: $('.alert.alert-info, .js-export-tip') || null,
+  };
 
-  // 通过 ?api=... 指定后端；否则默认同域根（便于本地）
-  const apiBase = new URLSearchParams(location.search).get("api")?.replace(/\/+$/, "") || "";
+  /** ---------- state ---------- */
+  let currentData = []; // 标准化后的列表，既用于渲染，也用于导出
 
-  let products = [];  // 当前数据
+  /** ---------- utils ---------- */
+  const priceOrPlaceholder = (p) => (!p || (typeof p === 'string' && !p.trim())) ? '€ 0,00' : p;
 
-  function langFromHeader(rsp) {
-    try { return rsp.headers.get("X-Lang") || "de"; } catch { return "de"; }
+  // 看起来像编号：纯数字，或数字-数字
+  const isCodeLike = (s) => /^\s*\d+(?:-\d+)*\s*$/.test(String(s || ''));
+
+  // 从 url 尾部提取 id，例如 .../xxx,21,80.html -> 80
+  const idFromUrl = (u = '') => {
+    const m = /,(\d+)\.html(?:[?#].*)?$/i.exec(u);
+    return m ? m[1] : '';
+  };
+
+  // 规范化 ItemNo：优先后端的 sku；不行用 URL 里的尾号；否则留空
+  const normalizeItemNo = (item) => {
+    const sku = (item.sku ?? '').toString().trim();
+    if (isCodeLike(sku)) return sku;
+    const fromUrl = idFromUrl(item.url || '');
+    if (isCodeLike(fromUrl)) return fromUrl;
+    return '';
+  };
+
+  // 从 URL 猜测图片扩展名；ExcelJS 需要 png/jpeg/gif/webp 等
+  const extFromUrl = (u = '') => {
+    const m = /\.([a-z0-9]+)(?:[?#].*)?$/i.exec(u);
+    let ext = (m?.[1] || 'jpg').toLowerCase();
+    if (ext === 'jpg') ext = 'jpeg';
+    return ext;
+  };
+
+  // ArrayBuffer -> base64（分片，避免 call stack 爆）
+  const ab2b64 = (buf) => {
+    const bytes = new Uint8Array(buf);
+    const chunk = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  };
+
+  // 通过后端代理，把图片取回并转成 dataURL base64
+  async function fetchImageBase64(imgUrl) {
+    const proxy = `${API_BASE}/v1/api/image?url=${encodeURIComponent(imgUrl)}`;
+    const res = await fetch(proxy, { mode: 'cors' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength === 0) throw new Error('empty image');
+    const ext = extFromUrl(imgUrl);               // e.g. jpeg/png/webp
+    const base64 = ab2b64(buf);
+    // ExcelJS 支持 { base64, extension }，这里同时附带 dataURL 头更清晰
+    const dataURL = `data:image/${ext};base64,${base64}`;
+    return { dataURL, ext };
   }
 
-  function setStat(text) {
-    elStat.textContent = text;
-  }
+  /** ---------- render table ---------- */
+  function renderTable(items) {
+    currentData = items.map((x, i) => ({
+      idx: i + 1,
+      sku: normalizeItemNo(x),
+      title: (x.title ?? '').toString().trim() || '—',
+      url: x.url || '',
+      img: x.img || '',
+      price: priceOrPlaceholder(x.price),
+      moq: (x.moq ?? '').toString().trim() || '—',
+    }));
 
-  function setBusy(b) {
-    elFetch.disabled = b;
-    elXlsx.disabled = b || products.length === 0;
-  }
+    const tbody = els.tableBody;
+    if (!tbody) return;
 
-  function ensureApi() {
-    if (!apiBase) {
-      alert("请通过 ?api= 后端地址 访问此页，例如：/?api=https://<你的后端域名>");
-      throw new Error("missing api base");
+    tbody.innerHTML = '';
+    for (const row of currentData) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${row.idx}</td>
+        <td>${row.sku || '—'}</td>
+        <td><img src="${row.img || ''}" style="height:54px;max-width:92px;object-fit:contain;border-radius:4px;background:#fff"/></td>
+        <td>${row.title}</td>
+        <td>${row.moq}</td>
+        <td>${row.price}</td>
+        <td><a href="${row.url}" target="_blank" rel="noreferrer">链接</a></td>
+      `;
+      tbody.appendChild(tr);
     }
   }
 
-  async function fetchJson(url) {
-    const rsp = await fetch(url, { credentials: "omit" });
-    if (!rsp.ok) throw new Error(`HTTP ${rsp.status}`);
-    const lang = langFromHeader(rsp);
-    const data = await rsp.json();
-    return { data, lang };
-  }
-
-  // 解析 & 预览
-  async function doFetch() {
+  /** ---------- fetch catalog ---------- */
+  async function fetchCatalog() {
     try {
-      ensureApi();
-      setBusy(true);
+      const url = (els.url?.value || '').trim();
+      if (!url) return;
+      const limit = parseInt(els.selectLimit?.value || '50', 10) || 50;
 
-      const listUrl = (elUrl.value || "").trim();
-      const limit = parseInt(elLimit.value, 10) || 50;
+      console.log('[mvp3] action: fetch', url, { limit });
+      const resp = await fetch(`${API_BASE}/v1/api/parse?url=${encodeURIComponent(url)}&limit=${limit}`, {
+        method: 'GET',
+        mode: 'cors',
+      });
+      const json = await resp.json();
 
-      if (!listUrl) {
-        alert("请输入目录页 URL");
-        return;
-      }
+      // 后端既可能给 products，也可能给 items；优先 items
+      const list = Array.isArray(json?.items) && json.items.length
+        ? json.items
+        : (Array.isArray(json?.products) ? json.products : []);
 
-      // 让后端直接把前 limit 张图片转成 base64 返回（字段：img_b64）
-      const url =
-        `${apiBase}/v1/api/catalog/parse` +
-        `?url=${encodeURIComponent(listUrl)}` +
-        `&limit=${limit}` +
-        `&enrich=true` +
-        `&img=base64&imgCount=${limit}`;
+      renderTable(list);
 
-      const { data } = await fetchJson(url);
-      if (!data || !data.ok) throw new Error(data?.error || "解析失败");
-
-      products = Array.isArray(data.items) ? data.items : (data.products || []);
-      const total = data.count || products.length || 0;
-
-      setStat(`抓取成功：共 ${total} 条（预览前 ${Math.min(total, 50)} 条）`);
-      renderTable(products.slice(0, Math.min(products.length, 50)));
-    } catch (e) {
-      console.error("[mvp3] fetch error:", e);
-      alert(`抓取失败：${e.message || e}`);
-    } finally {
-      setBusy(false);
+      const okMsg = `抓取成功：共 ${list.length} 条（预览前 ${Math.min(list.length, limit)} 条）`;
+      els.tip && (els.tip.textContent = okMsg);
+    } catch (err) {
+      console.error('[mvp3] fetch error', err);
+      alert('抓取失败：' + (err?.message || err));
     }
   }
 
-  function renderTable(list) {
-    if (!list || list.length === 0) {
-      tbl.style.display = "none";
-      empty.style.display = "";
-      empty.textContent = "ui.no_data";
+  /** ---------- export to excel ---------- */
+  async function exportExcel() {
+    if (!window.ExcelJS) {
+      alert('ExcelJS 未加载');
       return;
     }
-    empty.style.display = "none";
-    tbl.style.display = "";
+    const ExcelJS = window.ExcelJS;
 
-    tbody.innerHTML = "";
-    list.forEach((it, i) => {
-      const tr = document.createElement("tr");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Catalog');
 
-      const tdNo = document.createElement("td");
-      tdNo.textContent = String(i + 1);
-      tr.appendChild(tdNo);
+    // 列定义
+    ws.columns = [
+      { header: 'Item No.',   key: 'sku',   width: 18 },
+      { header: 'Picture',    key: 'pic',   width: 22 },
+      { header: 'Description',key: 'title', width: 60 },
+      { header: 'MOQ',        key: 'moq',   width: 10 },
+      { header: 'Unit Price', key: 'price', width: 14 },
+      { header: 'Link',       key: 'link',  width: 12 },
+    ];
+    ws.getRow(1).font = { bold: true };
 
-      const tdPic = document.createElement("td");
-      const img = document.createElement("img");
-      img.className = "thumb";
-      // 列表中为避免跨域，走后端图片代理（不是 base64）
-      if (it.img) {
-        const proxied = `${apiBase}/v1/api/image?url=${encodeURIComponent(it.img)}`;
-        img.src = proxied;
-      }
-      tdPic.appendChild(img);
-      tr.appendChild(tdPic);
-
-      const tdTitle = document.createElement("td");
-      tdTitle.textContent = it.title || "";
-      tr.appendChild(tdTitle);
-
-      const tdMoq = document.createElement("td");
-      tdMoq.textContent = it.moq || "—";
-      tr.appendChild(tdMoq);
-
-      const tdPrice = document.createElement("td");
-      tdPrice.textContent = it.price || "—";
-      tr.appendChild(tdPrice);
-
-      const tdLink = document.createElement("td");
-      if (it.url) {
-        const a = document.createElement("a");
-        a.href = it.url; a.target = "_blank"; a.rel = "noreferrer";
-        a.textContent = "链接";
-        tdLink.appendChild(a);
-      } else {
-        tdLink.textContent = "—";
-      }
-      tr.appendChild(tdLink);
-
-      tbody.appendChild(tr);
-    });
-  }
-
-  // small helper: 解析 dataURL 的扩展名（缺省 jpeg）
-  function extFromDataUrl(dataUrl) {
-    const m = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(dataUrl || "");
-    if (!m) return "jpeg";
-    const mime = m[1].toLowerCase();
-    if (mime.includes("png")) return "png";
-    if (mime.includes("gif")) return "gif";
-    if (mime.includes("webp")) return "webp";
-    if (mime.includes("bmp")) return "bmp";
-    if (mime.includes("svg")) return "svg";
-    return "jpeg";
-  }
-
-  // fallback：如果列表里没有 img_b64，就临时向后端要一份 base64
-  async function ensureBase64(it) {
-    if (it.img_b64) return it.img_b64;
-    if (!it.img) return "";
-
-    try {
-      const url = `${apiBase}/v1/api/image64?url=${encodeURIComponent(it.img)}`;
-      const { data } = await fetchJson(url);
-      if (data && data.ok && data.base64) {
-        it.img_b64 = data.base64;
-        return data.base64;
-      }
-    } catch (e) {
-      console.warn("[img64] convert failed:", it.img, e);
+    // 先写文本，再插入图片（行高稍微大一些方便缩略图）
+    const rowsMeta = [];
+    for (const row of currentData) {
+      const r = ws.addRow({
+        sku: row.sku || '',
+        pic: '',
+        title: row.title,
+        moq: row.moq,
+        price: row.price,
+        link: row.url ? { text: '链接', hyperlink: row.url } : '',
+      });
+      r.height = 78;
+      rowsMeta.push({ excelRow: r.number, img: row.img });
     }
-    return "";
-  }
 
-  // 导出 Excel（带内嵌图片）
-  async function exportXlsx() {
-    try {
-      if (!products || products.length === 0) {
-        alert("没有可导出的数据");
-        return;
-      }
-      setBusy(true);
+    // 逐行嵌入图片（稳妥起见串行；如需更快可做小并发队列）
+    for (const meta of rowsMeta) {
+      const imgUrl = meta.img;
+      if (!imgUrl) continue;
 
-      const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet("catalog");
+      try {
+        const { dataURL, ext } = await fetchImageBase64(imgUrl);
+        const imgId = wb.addImage({ base64: dataURL, extension: ext });
 
-      // 列
-      ws.columns = [
-        { header: "#", key: "idx", width: 6 },
-        { header: "Picture", key: "pic", width: 14 },
-        { header: "Description", key: "title", width: 60 },
-        { header: "MOQ", key: "moq", width: 12 },
-        { header: "Unit Price", key: "price", width: 16 },
-        { header: "Link", key: "link", width: 12 },
-      ];
-
-      // 行数据
-      products.forEach((it, i) => {
-        ws.addRow({
-          idx: i + 1,
-          pic: "", // 图片稍后插入
-          title: it.title || "",
-          moq: it.moq || "",
-          price: it.price || "",
-          link: "链接",
+        // Picture 列是第 2 列（B 列）；anchor 使用 0-based col/row
+        const rowIdx0 = meta.excelRow - 1;
+        ws.addImage(imgId, {
+          tl:  { col: 1, row: rowIdx0 },  // B列
+          ext: { width: 120, height: 70 },
+          editAs: 'oneCell',
         });
-      });
 
-      // 给“链接”列加超链接
-      products.forEach((it, i) => {
-        const cell = ws.getCell(i + 2, 6); // 第 2 行开始，第 6 列
-        if (it.url) {
-          cell.value = { text: "链接", hyperlink: it.url, tooltip: it.url };
-          cell.font = { color: { argb: "FF1D4ED8" }, underline: true };
-        } else {
-          cell.value = "";
-        }
-      });
-
-      // 行高为图片预留空间
-      for (let r = 2; r <= products.length + 1; r++) {
-        ws.getRow(r).height = 52;
+        console.log('[xlsx] embed image ok:', imgUrl);
+      } catch (err) {
+        console.warn('[xlsx] embed image failed:', imgUrl, err?.message || err);
       }
-
-      // 逐条插入图片（异步并发控制）
-      const concurrency = 6;
-      let idx = 0;
-      async function worker() {
-        while (idx < products.length) {
-          const i = idx++;
-          const it = products[i];
-          const base64 = await ensureBase64(it);
-          if (!base64) continue;
-
-          const ext = extFromDataUrl(base64);
-          const imgId = wb.addImage({ base64, extension: ext });
-
-          // 放在第 i+2 行、第 2 列（B）的位置；约 46x46 px
-          ws.addImage(imgId, {
-            tl: { col: 1 + 0.15, row: i + 1 + 0.2 }, // B 列偏移一点
-            ext: { width: 46, height: 46 },
-            editAs: "oneCell",
-          });
-        }
-      }
-      await Promise.all(Array.from({ length: concurrency }, worker));
-
-      // 导出
-      const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const name = `catalog-${Date.now()}.xlsx`;
-      saveAs(blob, name);
-    } catch (e) {
-      console.error("[xlsx] export error:", e);
-      alert(`导出失败：${e.message || e}`);
-    } finally {
-      setBusy(false);
     }
+
+    // 下载 xlsx
+    const filename = `catalog-preview-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now()}.xlsx`;
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(a.href);
+    a.remove();
+
+    els.tipExport && (els.tipExport.textContent = '已导出 Excel（含图片、价格占位符）');
+    console.log('[mvp3] action: export', filename);
   }
 
-  function clearAll() {
-    products = [];
-    tbody.innerHTML = "";
-    tbl.style.display = "none";
-    empty.style.display = "";
-    empty.textContent = "ui.no_data";
-    setStat("抓取成功：共 0 条（预览前 50 条）");
-  }
+  /** ---------- bind ---------- */
+  els?.btnFetch?.addEventListener('click', fetchCatalog);
+  els?.btnExport?.addEventListener('click', exportExcel);
 
-  // 事件
-  elFetch.addEventListener("click", doFetch);
-  elXlsx.addEventListener("click", exportXlsx);
-  elClear.addEventListener("click", clearAll);
+  // 输入框回车触发抓取
+  els?.url?.addEventListener?.('keydown', (e) => {
+    if (e.key === 'Enter') fetchCatalog();
+  });
 
-  // 初始可用态
-  setBusy(false);
+  // 健康检查（非阻塞）
+  (async () => { try { await fetch(`${API_BASE}/health`, { mode: 'cors' }); } catch {} })();
 })();
