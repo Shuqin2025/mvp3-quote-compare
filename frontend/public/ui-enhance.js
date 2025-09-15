@@ -186,16 +186,28 @@
   }
 
   /** ---------- actions ---------- */
+  // ======= 替换 1：fetchCatalog（请求时直接要 base64 缩略图，并用于预览） ======= //
   async function fetchCatalog() {
     try {
       const url = (els.url?.value || '').trim();
       if (!url) return;
       const limit = parseInt(els.selectLimit?.value || '50', 10) || 50;
 
-      const list = await parseCatalog(url, limit);
-      renderTable(list);
+      // 关键：让后端把前 limit 条的图片直接转成 base64 带回来（img_b64 字段）
+      const ep = `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}&img=base64&imgCount=${limit}`;
+      const r = await fetch(ep, { method: 'GET', mode: 'cors' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      const list = Array.isArray(j?.items) && j.items.length
+        ? j.items
+        : (Array.isArray(j?.products) ? j.products : []);
+      if (!Array.isArray(list)) throw new Error('响应格式不正确，items 不是数组。');
 
-      const okMsg = `抓取成功：共 ${list.length} 条（预览前 ${Math.min(list.length, limit)} 条）`;
+      // 预览时优先显示 base64（没有的再用原图 URL）
+      const renderList = list.map(x => ({ ...x, img: x.img_b64 || x.img || '' }));
+      renderTable(renderList);
+
+      const okMsg = `抓取成功：共 ${renderList.length} 条（预览前 ${Math.min(renderList.length, limit)} 条）`;
       if (els.tip) { els.tip.textContent = okMsg; els.tip.style.display = 'block'; }
     } catch (err) {
       console.error('[mvp3] fetch error', err);
@@ -203,6 +215,7 @@
     }
   }
 
+  // ======= 替换 2：exportExcel（优先直接嵌入 data:，否则走 /image64 兜底） ======= //
   async function exportExcel() {
     if (!window.ExcelJS) { alert('ExcelJS 未加载'); return; }
     const ExcelJS = window.ExcelJS;
@@ -234,21 +247,60 @@
       rowsMeta.push({ excelRow: r.number, img: row.img });
     }
 
-    // 串行嵌图（稳定），需要更快可做并发控制
+    // 小工具：把 dataURL -> {base64, ext}
+    const parseDataUrl = (dataURL) => {
+      const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
+      if (!m) return null;
+      const ct = m[1].toLowerCase();
+      let ext = 'jpeg';
+      if (ct.includes('png')) ext = 'png';
+      else if (ct.includes('webp')) ext = 'webp';
+      else if (ct.includes('gif')) ext = 'gif';
+      else if (ct.includes('bmp')) ext = 'bmp';
+      return { base64: `data:${ct};base64,${m[2]}`, ext };
+    };
+
+    // 兜底：让后端把远程图片转成 base64（避免前端跨域）
+    async function fetchB64ViaServer(imgUrl) {
+      const ep = `${API_BASE}/v1/api/image64?url=${encodeURIComponent(imgUrl)}`;
+      const r = await fetch(ep, { method: 'GET', mode: 'cors' });
+      if (!r.ok) throw new Error(`image64 HTTP ${r.status}`);
+      const j = await r.json();
+      if (!j?.base64) throw new Error('no base64');
+      const parsed = parseDataUrl(j.base64);
+      if (!parsed) throw new Error('bad base64');
+      return parsed;
+    }
+
+    // 串行嵌图（稳定）
     for (const meta of rowsMeta) {
-      const imgUrl = meta.img;
-      if (!imgUrl) continue;
       try {
-        const { dataURL, ext } = await fetchImageBase64(imgUrl);
-        const imgId = wb.addImage({ base64: dataURL, extension: ext });
+        let ext, base64DataUrl;
+
+        // 1) 如果 img 本身就是 data: 开头（我们抓取时就可能是）
+        const parsedFromData = parseDataUrl(meta.img);
+        if (parsedFromData) {
+          ext = parsedFromData.ext;
+          base64DataUrl = parsedFromData.base64;
+        }
+
+        // 2) 否则走后端 /image64 兜底
+        if (!base64DataUrl && meta.img) {
+          const parsed = await fetchB64ViaServer(meta.img);
+          ext = parsed.ext; base64DataUrl = parsed.base64;
+        }
+        if (!base64DataUrl) continue;
+
+        const imgId = wb.addImage({ base64: base64DataUrl, extension: ext || 'jpeg' });
+
         const rowIdx0 = meta.excelRow - 1; // 0-based
         ws.addImage(imgId, {
-          tl:  { col: 1, row: rowIdx0 },  // B 列（Picture）
+          tl:  { col: 1, row: rowIdx0 },     // B 列（Picture）
           ext: { width: 120, height: 70 },
           editAs: 'oneCell',
         });
       } catch (err) {
-        console.warn('[xlsx] embed image failed:', imgUrl, err?.message || err);
+        console.warn('[xlsx] embed image failed:', meta.img, err?.message || err);
       }
     }
 
