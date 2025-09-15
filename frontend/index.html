@@ -6,10 +6,10 @@
   <title>MVP3 Quote Compare</title>
 
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 1em; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 1em; background:#fafafa; }
     #langSwitcher { margin-bottom: 1em; display: flex; gap: 8px; }
-    #langSwitcher button { padding: 4px 8px; }
-    .container { max-width: 1200px; }
+    #langSwitcher button { padding: 4px 8px; border:1px solid #ddd; background:#fff; border-radius:6px; cursor:pointer; }
+    .container { max-width: 1200px; margin:0 auto; }
     .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 10px; }
     .alert-green { background:#e9f7ef; border:1px solid #bde5c8; }
     .alert-amber { background:#fff8e1; border:1px solid #ffe082; }
@@ -24,20 +24,23 @@
     .ft { color:#666; margin-top:12px; }
   </style>
 
-  <!-- UI 增强（按钮、提示等） -->
+  <!-- 可选：UI 补充样式/文案（没有也不影响运行） -->
   <link rel="stylesheet" href="/ui-enhance.css?v=2025-09-14-stableA" />
 </head>
 <body>
+  <!-- 你的 React/Vite 应用仍然渲染到这里 -->
   <div id="root"></div>
 
-  <!-- 语言/UI 辅助（与业务无关） -->
+  <!-- 可选：国际化辅助（没有也不影响） -->
   <script src="/i18n.js?v=2025-09-14-stableA"></script>
-  <script src="/ui-enhance.js?v=2025-09-14-stableA" defer></script>
 
-  <!-- ExcelJS：用于把图片真正嵌入 xlsx（你原逻辑需要时可用） -->
+  <!-- ExcelJS：用于把图片真正嵌入 xlsx -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
-  <!-- Vite / React 入口（保持不动） -->
+  <!-- MVP3 UI + 导出增强（解决“Excel 没有图片” + 恢复样式） -->
+  <script src="/ui-enhance.js?v=2025-09-15-stableB" defer></script>
+
+  <!-- 你原有的 Vite / React 入口（保持不动） -->
   <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>
