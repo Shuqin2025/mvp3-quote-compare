@@ -1,4 +1,4 @@
-/* public/ui-enhance.js — 接管按钮 + ExcelJS 导出（含图片），并把条数改为 50/100/200 */
+/* public/ui-enhance.js — 接管按钮 + ExcelJS 导出（含图片），条数 50/100/200 */
 
 (() => {
   const $  = (s, ctx=document) => ctx.querySelector(s);
@@ -7,10 +7,19 @@
 
   const DEFAULT_PRICE = "€ 0,00";
   const state = { apiBase: "", items: [] };
-  const getApiBase = () => { if (state.apiBase) return state.apiBase; try { const u = new URL(location.href); state.apiBase = (u.searchParams.get("api") || "").replace(/\/+$/,""); return state.apiBase; } catch { return ""; } };
 
+  const getApiBase = () => {
+    if (state.apiBase) return state.apiBase;
+    try {
+      const u = new URL(location.href);
+      state.apiBase = (u.searchParams.get("api") || "").replace(/\/+$/,"");
+      return state.apiBase;
+    } catch { return ""; }
+  };
+
+  // ---------- 绑定现有控件 ----------
   const els = { url:null, btnFetch:null, btnExport:null, btnClear:null, limit:null, previewBox:null, table:null, tbody:null, toast:null };
-  function byText(tag, re){ return $$(tag).find(n => re.test((n.innerText || n.textContent || "").trim())); }
+  const byText = (tag, re) => $$(tag).find(n => re.test((n.innerText || n.textContent || "").trim()));
 
   function hookUI(){
     els.url      = $('input[placeholder*="目录"], input[placeholder*="页面"], textarea[placeholder*="目录"]') || $('input,textarea');
@@ -19,16 +28,17 @@
     els.btnClear = byText('button', /清空数据|清空/i);
     els.limit    = $$('select').find(s => true) || null;
 
-    // 把“预览（前 50 条）”改成 50/100/200
+    // 统一成 50 / 100 / 200
     if (els.limit) {
-      const values = [50, 100, 200];
-      els.limit.innerHTML = values.map(v => `<option value="${v}">${v}</option>`).join("");
+      els.limit.innerHTML = [50,100,200].map(v => `<option value="${v}">${v}</option>`).join("");
       els.limit.value = "50";
     }
 
+    // 预览容器（包含 ui.no_data 的区域）
     els.previewBox = $$('div,section,main,article').find(d => (d.textContent||'').includes('ui.no_data')) || document.body;
   }
 
+  // ---------- Toast ----------
   function ensureToast(){
     if (els.toast) return;
     els.toast = el('div', { id:'mvp3-toast' });
@@ -42,6 +52,7 @@
     els.toast.textContent = msg;
   }
 
+  // ---------- 预览表格 ----------
   function ensureTable(){
     if (els.table && document.body.contains(els.table)) return;
     const wrap = el('div'); wrap.style.cssText = 'margin-top:8px;';
@@ -101,6 +112,7 @@
     for (const p of cands) { try { const r = await fetch(api.replace(/\/$/,'') + p); if (r.ok) return; } catch {} }
   }
 
+  // ---------- 抓取 ----------
   async function fetchCatalog(e){
     if (e) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); }
     try{
@@ -116,10 +128,9 @@
       probeHealth(api);
 
       const limit = parseInt((els.limit && els.limit.value) || '50', 10) || 50;
+      const enrichCount = Math.min(limit, 50); // 避免一次性过慢
       toast('ok','正在抓取中…');
 
-      // 可选传 enrichCount（例如等于 limit，但最多 50，避免过慢）
-      const enrichCount = Math.min(limit, 50);
       const url = `${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}&enrich=true&enrichCount=${enrichCount}`;
       const res = await fetch(url);
       if(!res.ok){ clearData(); return toast('fail', `抓取失败：HTTP ${res.status}`); }
@@ -140,20 +151,120 @@
     }
   }
 
-  // 这里省略 ExcelJS 导出函数（你上一版已可用且带图片、占位符）；保持不变即可
-  // 如果需要我再粘一次完整导出函数，也可以。
+  // ---------- ExcelJS 导出（含图片代理、价格占位符） ----------
+  async function exportExcel(e){
+    if (e) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); }
+    if (!state.items.length) return toast('fail','没有可导出的数据');
 
-  // ------- 启动：捕获阶段接管按钮 -------
+    if (typeof ExcelJS === 'undefined') {
+      toast('fail','未加载 ExcelJS，已回退为 .xls（不含图片）。');
+      const table = els.table;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${table ? table.outerHTML : ''}</body></html>`;
+      const blob = new Blob([html], { type:'application/vnd.ms-excel' });
+      const a = el('a', { download:`catalog-${Date.now()}.xls` });
+      a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+      return;
+    }
+
+    try{
+      const api = getApiBase();
+      const wb  = new ExcelJS.Workbook();
+      const ws  = wb.addWorksheet('Catalog', { properties:{ defaultRowHeight: 64 } });
+
+      // 冻结首行 + 筛选 + 表头加粗
+      ws.views = [{ state: 'frozen', ySplit: 1 }];
+      ws.autoFilter = { from: 'A1', to: 'F1' };
+      ws.getRow(1).font = { bold: true };
+
+      ws.columns = [
+        { header:'Item No.', key:'sku',   width:16 },
+        { header:'Picture',  key:'img',   width:14 },
+        { header:'Description', key:'title', width:60 },
+        { header:'MOQ',      key:'moq',   width:12 },
+        { header:'Unit Price', key:'price', width:16 },
+        { header:'Link',     key:'url',   width:42 }
+      ];
+
+      state.items.forEach(it=>{
+        ws.addRow({
+          sku: it.sku ?? it.itemNo ?? it.code ?? '',
+          img: '',
+          title: it.title ?? it.name ?? '',
+          moq: it.moq ?? '',
+          // 这里再次兜底（保证一定有占位符）
+          price: (it.price && String(it.price).trim()) || DEFAULT_PRICE,
+          url: it.url ?? ''
+        });
+      });
+
+      for (let i=0;i<state.items.length;i++){
+        const rowIdx = i + 2;
+        const url = state.items[i].url || '';
+        if (url) ws.getCell(rowIdx,6).value = { text:'链接', hyperlink:url };
+        ws.getRow(rowIdx).height = 64;
+      }
+
+      // 图片代理拉取 → 纯 base64
+      const toBase64 = (ab) => {
+        const b = new Uint8Array(ab); let s=''; for (let i=0;i<b.length;i++) s += String.fromCharCode(b[i]);
+        return btoa(s); // 纯 base64，不能带 data:image/...;base64, 前缀
+      };
+      const detectExt = (ct, url) => (/png/i.test(ct) || /\.png(\?|$)/i.test(url)) ? 'png' : 'jpeg';
+
+      const runBatch = async (arr, limit, worker) => {
+        let idx = 0; const runners = Array.from({length:limit}).map(async () => {
+          for(; idx < arr.length; ){ const i = idx++; await worker(arr[i], i); }
+        });
+        await Promise.all(runners);
+      };
+
+      await runBatch(state.items, 6, async (it, idx) => {
+        if (!it.img) return;
+        try {
+          const proxied = `${api}/v1/api/image?url=${encodeURIComponent(it.img)}`;
+          console.log('[xlsx] fetch image via proxy:', proxied);
+          const r = await fetch(proxied);
+          if (!r.ok) return;
+          const ab  = await r.arrayBuffer();
+          const ct  = r.headers.get('content-type') || '';
+          const ext = detectExt(ct, it.img);
+          const base64 = toBase64(ab);
+
+          const imageId = wb.addImage({ base64: base64, extension: ext });
+          const rowIdx  = idx + 2;
+          // 放到 B 列（col:1），行内大小 60x60
+          ws.addImage(imageId, { tl:{ col:1, row: rowIdx-1 }, ext:{ width:60, height:60 }, editAs:'oneCell' });
+        } catch {}
+      });
+
+      // 下载
+      const host = (() => { try { return new URL(els.url.value).hostname.replace(/^www\./,''); } catch { return 'catalog'; } })();
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = el('a', { download:`${host}-catalog-${new Date().toISOString().slice(0,10)}.xlsx` });
+      a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+      toast('ok','已导出 Excel（含图片、价格占位符）');
+    } catch (e) {
+      console.error('[exceljs]', e);
+      toast('fail','ExcelJS 导出遇到问题，回退为 .xls（不含图）');
+      const table = els.table;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${table ? table.outerHTML : ''}</body></html>`;
+      const blob = new Blob([html], { type:'application/vnd.ms-excel' });
+      const a = el('a', { download:`catalog-${Date.now()}.xls` });
+      a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+    }
+  }
+
+  // ---------- 启动：捕获阶段接管 ----------
   function start(){
     hookUI(); ensureToast(); ensureTable(); clearData();
 
-    const exportBtnHandler = window.__mvp_export_handler; // 若你上版已挂载，可复用
     els.btnFetch  && els.btnFetch.addEventListener('click',  fetchCatalog, { capture:true });
+    els.btnExport && els.btnExport.addEventListener('click', exportExcel, { capture:true });
     els.btnClear  && els.btnClear.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); clearData(); }, { capture:true });
-    if (els.btnExport) {
-      // 若你用的是我上一版的导出函数，这里确保绑定即可
-      els.btnExport.addEventListener('click', exportBtnHandler || (()=>{}), { capture:true });
-    }
 
     els.url && els.url.addEventListener('keydown', e => { if(e.key==='Enter') fetchCatalog(e); });
   }
