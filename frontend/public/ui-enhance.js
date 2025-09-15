@@ -1,6 +1,7 @@
 /* public/ui-enhance.js — 强化接管版：多事件 + 逐级匹配文本；Excel 导出含图片与价格占位符 */
 
 (() => {
+
   // ---- 轻量 Buffer polyfill（防止第三方脚本误用）----
   if (typeof window.Buffer === 'undefined') {
     window.Buffer = {
@@ -160,13 +161,15 @@
     hookUI();
     if (!state.items.length) return toast('fail','没有可导出的数据');
 
+    // 无 ExcelJS：退化为 HTML 表格（xls）下载
     if (typeof ExcelJS === 'undefined') {
       const table = els.table;
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${table?table.outerHTML:''}</body></html>`;
       const blob = new Blob([html], { type:'application/vnd.ms-excel' });
       const a = el('a', { download:`catalog-${Date.now()}.xls` });
       a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
-      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+      // 给足时间，避免过早 revoke 导致下载被中断
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 30000);
       return;
     }
 
@@ -216,6 +219,7 @@
       }); await Promise.all(runners);
     };
 
+    // 并发取图并嵌入
     await runBatch(state.items, 6, async (it, idx) => {
       if (!it.img) return;
       try {
@@ -237,10 +241,30 @@
 
     const host = (()=>{ try { return new URL(els.url.value).hostname.replace(/^www\./,''); } catch { return 'catalog'; } })();
     const buf = await wb.xlsx.writeBuffer();
+
+    // —— 关键修复：更稳妥的下载触发 + 更长 revoke 时间 + 旧 Edge 兼容 ——
+    const filename = `${host}-catalog-${new Date().toISOString().slice(0,10)}.xlsx`;
     const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const a = el('a', { download:`${host}-catalog-${new Date().toISOString().slice(0,10)}.xlsx` });
-    a.href = URL.createObjectURL(blob); document.body.appendChild(a); a.click();
-    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 800);
+
+    if (window.navigator && typeof window.navigator.msSaveOrOpenBlob === 'function') {
+      // 旧 Edge / IE
+      window.navigator.msSaveOrOpenBlob(blob, filename);
+    } else {
+      const urlObj = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = urlObj;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      console.log('[xlsx] download triggered:', filename);
+      // 30 秒后再 revoke，避免某些环境下下载尚未真正开始就被撤销
+      setTimeout(() => {
+        URL.revokeObjectURL(urlObj);
+        a.remove();
+      }, 30000);
+    }
+
     toast('ok','已导出 Excel（含图片、价格占位符）');
   }
 
