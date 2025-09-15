@@ -1,7 +1,7 @@
-/* public/ui-enhance.js — HOTFIX: 移除 MutationObserver 死循环；Excel 导出含图片与价格占位符 */
+/* public/ui-enhance.js — 强化接管版：多事件 + 逐级匹配文本；Excel 导出含图片与价格占位符 */
 
 (() => {
-  // ---- 防止第三方脚本用到 Node Buffer 报错（非必须，但安全）----
+  // ---- 轻量 Buffer polyfill（防止第三方脚本误用）----
   if (typeof window.Buffer === 'undefined') {
     window.Buffer = {
       from: (data, enc) => {
@@ -37,8 +37,10 @@
   const els = { url:null, limit:null, previewBox:null, table:null, tbody:null, toast:null };
 
   function hookUI(){
-    // 输入框
-    els.url = $('input[placeholder*="目录"], input[placeholder*="页面"], textarea[placeholder*="目录"]') || $('input,textarea');
+    // 输入框（尽量找“目录/列表/页面”占位，找不到就退化到首个 input/textarea）
+    els.url =
+      $('input[placeholder*="目录"], input[placeholder*="页面"], input[placeholder*="列表"], textarea[placeholder*="目录"]') ||
+      $('input[type=text]') || $('textarea') || $('input,textarea');
 
     // 下拉（只打一次补丁）
     const sel = $$('select').find(s => true);
@@ -49,7 +51,7 @@
     }
     els.limit = sel || null;
 
-    // 预览容器
+    // 预览容器（含 ui.no_data 的那个大盒子）
     els.previewBox = $$('div,section,main,article').find(d => (d.textContent||'').includes('ui.no_data')) || document.body;
   }
 
@@ -126,6 +128,7 @@
   // ---- 抓取 ----
   async function fetchCatalog(){
     try{
+      hookUI();                         // 每次操作前刷新引用
       const api = getApiBase(); if(!api) return toast('fail','缺少 ?api= 后端地址');
       const raw = (els.url && (els.url.value || els.url.textContent) || '').trim();
       if(!raw) return toast('fail','请输入目录/列表页链接');
@@ -135,9 +138,9 @@
 
       const limit = parseInt((els.limit && els.limit.value) || '50',10)||50;
       const enrichCount = Math.min(limit, 50);
-      toast('ok','正在抓取中…'); probeHealth(getApiBase());
+      toast('ok','正在抓取中…'); probeHealth(api);
 
-      const url = `${getApiBase()}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}&enrich=true&enrichCount=${enrichCount}`;
+      const url = `${api}/v1/api/catalog/parse?url=${encodeURIComponent(targetUrl)}&limit=${limit}&enrich=true&enrichCount=${enrichCount}`;
       const res = await fetch(url);
       if(!res.ok){ clearData(); return toast('fail', `抓取失败：HTTP ${res.status}`); }
       const data = await res.json().catch(()=> ({}));
@@ -154,10 +157,10 @@
 
   // ---- ExcelJS 导出（含图片）----
   async function exportExcel(){
+    hookUI();
     if (!state.items.length) return toast('fail','没有可导出的数据');
 
     if (typeof ExcelJS === 'undefined') {
-      // 兜底：纯 .xls（无图）
       const table = els.table;
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body>${table?table.outerHTML:''}</body></html>`;
       const blob = new Blob([html], { type:'application/vnd.ms-excel' });
@@ -241,19 +244,41 @@
     toast('ok','已导出 Excel（含图片、价格占位符）');
   }
 
-  // ---- 全局捕获：强力接管三个按钮 ----
-  function delegateClick(e){
-    const t = e.target.closest('button, a, [role="button"], input[type=button], input[type=submit]');
-    if (!t) return;
-    const text = (t.innerText || t.textContent || '').trim();
-    if (/导出\s*Excel/i.test(text)) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); exportExcel(); return; }
-    if (/抓取目录|抓取/i.test(text))   { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); fetchCatalog(); return; }
-    if (/清空数据|清空/i.test(text))   { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); clearData();   return; }
+  // ---- 事件接管：不依赖标签，逐级匹配文本 ----
+  function matchActionFromNode(node){
+    let depth = 0, cur = node;
+    while (cur && depth < 4) {
+      const text = (cur.innerText || cur.textContent || '').replace(/\s+/g,'').trim();
+      if (!text) { cur = cur.parentElement; depth++; continue; }
+      if (/导出Excel/i.test(text) || /导出Excel（.xlsx）?/.test(text)) return 'export';
+      if (/抓取目录|抓取/i.test(text)) return 'fetch';
+      if (/清空数据|清空/i.test(text)) return 'clear';
+      cur = cur.parentElement; depth++;
+    }
+    return null;
   }
+
+  function handleAction(action, e){
+    if (!action) return;
+    e && (e.preventDefault(), e.stopPropagation(), e.stopImmediatePropagation?.());
+    console.log('[mvp3] action:', action);
+    if (action === 'export') return exportExcel();
+    if (action === 'fetch')  return fetchCatalog();
+    if (action === 'clear')  return clearData();
+  }
+
+  function delegateAny(e){ handleAction(matchActionFromNode(e.target), e); }
 
   function start(){
     hookUI(); ensureToast(); ensureTable(); clearData();
-    document.addEventListener('click', delegateClick, true);      // 捕获阶段，阻断骨架旧逻辑
+
+    // 最大化命中率：多事件 + 捕获阶段
+    ['click','pointerup','mouseup'].forEach(evt => {
+      document.addEventListener(evt, delegateAny, true);
+    });
+    document.addEventListener('submit', (e)=> { handleAction('fetch', e); }, true);
+
+    // 在输入框按回车也能触发
     els.url && els.url.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); fetchCatalog(); } });
   }
 
