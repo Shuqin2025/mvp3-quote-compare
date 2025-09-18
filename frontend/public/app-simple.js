@@ -1,13 +1,44 @@
 // app-simple.js — single UI + i18n + image-embed Excel
-// (2025-09-16, default API fallback so domain works without ?api=...)
+// (2025-09-16, API base is now chosen in a robust, override-able way)
 
 (() => {
-  const $ = (s, r=document) => r.querySelector(s);
+  'use strict';
 
-  // Default backend so the app works without ?api=...
-  const API_DEFAULT = 'https://yunivera-mvp2-cwyr.onrender.com';
+  const $ = (s, r = document) => r.querySelector(s);
+  const isHttp = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
+
+  // ─────────────────────────── API base selection ───────────────────────────
+  // 1) ?api=...                2) window.__API_BASE__/window.API_BASE
+  // 3) import.meta.env.VITE_API_BASE (打包时注入)   4) <meta name="api-base">
+  // 5) fallback to gateway
   const apiParam = new URLSearchParams(location.search).get('api');
-  const API_BASE = (apiParam && /^https?:\/\//i.test(apiParam)) ? apiParam : API_DEFAULT;
+  const fromBoot =
+    (typeof window !== 'undefined') &&
+    (window.__API_BASE__ || window.API_BASE || window.__API_BASE_EFFECTIVE__);
+
+  let fromEnv;
+  try {
+    // 在非模块脚本里直接访问 import.meta 可能抛错，所以 try/catch 一下
+    fromEnv = (typeof import !== 'undefined' && typeof import.meta !== 'undefined')
+      ? (import.meta?.env?.VITE_API_BASE)
+      : (void 0);
+  } catch (_) {
+    fromEnv = void 0;
+  }
+
+  const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
+
+  const FALLBACK_GATEWAY = 'https://yunivera-gateway.onrender.com';
+
+  const API_BASE =
+    (isHttp(apiParam)   && apiParam)   ||
+    (isHttp(fromBoot)   && fromBoot)   ||
+    (isHttp(fromEnv)    && fromEnv)    ||
+    (isHttp(fromMeta)   && fromMeta)   ||
+    FALLBACK_GATEWAY;
+
+  // 方便在浏览器 Console 里验证
+  window.__API_BASE_EFFECTIVE__ = API_BASE;
 
   // ─────────── i18n ───────────
   const i18n = {
@@ -161,11 +192,11 @@
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Catalog');
     ws.columns = [
-      { header: i18n[lang].th[1], key: 'sku', width: 18 },
-      { header: i18n[lang].th[2], key: 'pic', width: 22 },
-      { header: i18n[lang].th[3], key: 'title', width: 60 },
-      { header: i18n[lang].th[4], key: 'moq', width: 10 },
-      { header: i18n[lang].th[5], key: 'price', width: 14 },
+      { header: i18n[lang].th[1], key: 'sku',  width: 18 },
+      { header: i18n[lang].th[2], key: 'pic',  width: 22 },
+      { header: i18n[lang].th[3], key: 'title',width: 60 },
+      { header: i18n[lang].th[4], key: 'moq',  width: 10 },
+      { header: i18n[lang].th[5], key: 'price',width: 14 },
       { header: i18n[lang].th[6], key: 'link', width: 12 },
     ];
     ws.getRow(1).font = { bold: true };
@@ -235,5 +266,4 @@
 
   // 轻量健康检查（不阻塞）
   (async () => { try { await fetch(`${API_BASE}/health`, { mode: 'cors' }); } catch {} })();
-
 })();
