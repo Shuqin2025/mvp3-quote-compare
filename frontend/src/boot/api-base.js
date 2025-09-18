@@ -1,63 +1,51 @@
 // frontend/src/boot/api-base.js
-// 统一计算 API_BASE（优先级：?api → window.__API_BASE__ → VITE_API_BASE → 兜底）
-const FROM_QUERY = new URLSearchParams(location.search).get('api');
+(() => {
+  // 1) 计算 API_BASE：优先 ?api=... → 其次 VITE_API_BASE → 再次固定网关
+  const q = new URLSearchParams(location.search);
+  const apiParam = q.get("api");
 
-const FROM_RUNTIME =
-  (typeof window !== 'undefined'
-   && typeof window.__API_BASE__ === 'string'
-   && /^https?:\/\//i.test(window.__API_BASE__))
-    ? window.__API_BASE__
-    : '';
+  const fromEnv =
+    (typeof import !== "undefined" &&
+      typeof import.meta !== "undefined" &&
+      import.meta.env &&
+      import.meta.env.VITE_API_BASE) || "";
 
-const FROM_ENV =
-  (typeof import.meta !== 'undefined'
-   && import.meta?.env?.VITE_API_BASE
-   && /^https?:\/\//i.test(import.meta.env.VITE_API_BASE))
-    ? import.meta.env.VITE_API_BASE
-    : '';
+  const FALLBACK = "https://yunivera-gateway.onrender.com";
+  const API_DEFAULT = fromEnv || FALLBACK;
+  const API_BASE =
+    apiParam && /^https?:\/\//i.test(apiParam) ? apiParam : API_DEFAULT;
 
-const FALLBACK = 'https://yunivera-gateway.onrender.com';
+  // 2) 暴露到 window，方便你在 Console 里检查
+  window.__API_BASE_EFFECTIVE__ = API_BASE;
 
-const API_BASE =
-  (FROM_QUERY && /^https?:\/\//i.test(FROM_QUERY) && FROM_QUERY)
-  || FROM_RUNTIME
-  || FROM_ENV
-  || FALLBACK;
+  // 3) 需要被重写的历史主机（旧硬编码）
+  const OLD_HOSTS = [
+    "https://yunivera-mvp2-cwyr.onrender.com",
+    // 如果有其它历史 host，也可以加到这里
+    // "https://yunivera-mvp2-private.onrender.com",
+  ];
 
-// 暴露给控制台方便核对
-try { Object.defineProperty(window, '__API_BASE_EFFECTIVE__', { value: API_BASE }); } catch {}
+  // 4) 打补丁：把相对 /v1/... 或旧 host 的请求统一改写到 API_BASE
+  const prefix = API_BASE.replace(/\/$/, "");
+  const origFetch = window.fetch.bind(window);
 
-// 需要被“替换掉”的旧后端域名（可按需扩充）
-const OLD_HOST_PATTERNS = [
-  /\/\/yunivera-mvp2-[^/]+\.onrender\.com/i, // 任何 yunivera-mvp2-*.onrender.com
-  /\/\/yunivera-mvp2-cwyr\.onrender\.com/i   // 你之前看到的具体那个
-];
+  window.fetch = (input, init) => {
+    let url = typeof input === "string" ? input : input && input.url;
 
-// 把指向“旧后端”的绝对 URL 改写到 API_BASE（保留原 pathname+search）
-function rewriter(url) {
-  try {
-    const u = new URL(url, location.origin);
-    const hit = OLD_HOST_PATTERNS.some((re) => re.test(u.href));
-    if (!hit) return url; // 不是旧后端，原样返回
-    const base = new URL(API_BASE);
-    return base.origin + u.pathname + u.search;
-  } catch {
-    return url;
-  }
-}
+    if (!url) return origFetch(input, init);
 
-// ---- patch fetch：入口最早执行，自动改写指向旧后端的请求 ----
-(function patchFetch() {
-  if (typeof window === 'undefined' || !window.fetch) return;
-  const orig = window.fetch;
-  window.fetch = function (input, init) {
-    let url = (typeof input === 'string') ? input : input?.url;
-    if (url) {
-      const newUrl = rewriter(url);
-      if (newUrl !== url) {
-        input = (typeof input === 'string') ? newUrl : new Request(newUrl, input);
-      }
+    // 相对路径 "/v1/..." → 直接前缀到 API_BASE
+    if (url.startsWith("/v1/")) {
+      return origFetch(prefix + url, init);
     }
-    return orig.call(this, input, init);
+
+    // 旧域名 "https://yunivera-mvp2-.../v1/..." → 改写到 API_BASE
+    const old = OLD_HOSTS.find((h) => url.startsWith(h + "/v1/"));
+    if (old) {
+      return origFetch(prefix + url.slice(old.length), init);
+    }
+
+    // 其它 URL 不动
+    return origFetch(input, init);
   };
 })();
