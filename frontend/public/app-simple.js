@@ -1,5 +1,5 @@
 // app-simple.js — single UI + i18n + image-embed Excel
-// Works as a classic script tag (no import), robust API base selection.
+// (2025-09-16, API base is chosen in a robust, override-able way)
 
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const $ = (s, r = document) => r.querySelector(s);
   const isHttp = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
 
-  // ────────────────────── API base selection ──────────────────────
+  // ─────────────────────────── API base selection ───────────────────────────
   // 优先级（从高到低）：
   // 1) URL 参数  ?api=...
   // 2) window.__API_BASE__ / window.API_BASE / window.__API_BASE_EFFECTIVE__
@@ -20,13 +20,20 @@
     (typeof window !== 'undefined') &&
     (window.__API_BASE__ || window.API_BASE || window.__API_BASE_EFFECTIVE__);
 
+  // ✅ 最小修复：只能检测 import.meta，且全链路判空（替换原来的 typeof import !== 'undefined' 写法）
   let fromEnv;
   try {
-    // 在非模块环境下，大多数浏览器仍允许读 import.meta 但没有 env；try/catch 以防兼容
-    fromEnv = (typeof import !== 'undefined' && typeof import.meta !== 'undefined')
-      ? (import.meta?.env?.VITE_API_BASE)
-      : undefined;
-  } catch (_) { fromEnv = undefined; }
+    const hasImportMeta = (typeof import.meta !== 'undefined');
+    fromEnv = (
+      hasImportMeta &&
+      import.meta &&
+      import.meta.env &&
+      typeof import.meta.env.VITE_API_BASE === 'string' &&
+      import.meta.env.VITE_API_BASE
+    ) ? import.meta.env.VITE_API_BASE : undefined;
+  } catch (_) {
+    fromEnv = undefined;
+  }
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
 
@@ -39,7 +46,7 @@
     (isHttp(fromMeta) && fromMeta) ||
     FALLBACK_GATEWAY;
 
-  // 方便在浏览器 Console 验证
+  // 方便在浏览器 Console 里验证
   window.__API_BASE_EFFECTIVE__ = API_BASE;
 
   // ─────────── i18n ───────────
@@ -124,7 +131,6 @@
     if (isCodeLike(fromUrl)) return fromUrl;
     return sku || '';
   };
-
   const parseDataUrl = (dataURL) => {
     const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
     if (!m) return null;
@@ -271,3 +277,4 @@
   // 轻量健康检查（不阻塞）
   (async () => { try { await fetch(`${API_BASE}/health`, { mode: 'cors' }); } catch {} })();
 })();
+
