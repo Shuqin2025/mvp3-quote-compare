@@ -49,6 +49,29 @@
   // 方便在浏览器 Console 里验证
   window.__API_BASE_EFFECTIVE__ = API_BASE;
 
+  // ─────────────────────────── Authorization（可选） ───────────────────────────
+  // 读取顺序：URL ?auth=... → window.__API_AUTH__/API_AUTH → env.VITE_API_AUTH → <meta name="api-auth"> → localStorage("mvp3_auth")
+  const authParam = new URLSearchParams(location.search).get('auth');
+  const fromBootAuth = (typeof window !== 'undefined') && (window.__API_AUTH__ || window.API_AUTH);
+  let fromEnvAuth;
+  try {
+    const hasImportMeta = (typeof import.meta !== 'undefined');
+    fromEnvAuth = (hasImportMeta && import.meta?.env?.VITE_API_AUTH) ? import.meta.env.VITE_API_AUTH : undefined;
+  } catch { fromEnvAuth = undefined; }
+  const fromMetaAuth = document.querySelector('meta[name="api-auth"]')?.content;
+  const fromLocalAuth = localStorage.getItem('mvp3_auth') || '';
+
+  const AUTH =
+    (authParam && String(authParam)) ||
+    (fromBootAuth && String(fromBootAuth)) ||
+    (fromEnvAuth && String(fromEnvAuth)) ||
+    (fromMetaAuth && String(fromMetaAuth)) ||
+    (fromLocalAuth && String(fromLocalAuth)) || '';
+
+  const AUTH_HEADERS = AUTH ? { Authorization: AUTH } : {};
+  // 便于排查
+  window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
+
   // ─────────── i18n ───────────
   const i18n = {
     zh: {
@@ -172,7 +195,7 @@
       const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
       const ep = `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}&img=base64&imgCount=${limit}`;
-      const r = await fetch(ep, { method: 'GET', mode: 'cors' });
+      const r = await fetch(ep, { method: 'GET', mode: 'cors', headers: AUTH_HEADERS }); // ★ 加上 Auth
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       const list = Array.isArray(j?.items) && j.items.length ? j.items : (Array.isArray(j?.products) ? j.products : []);
@@ -228,7 +251,7 @@
 
     async function fetchB64ViaServer(imgUrl) {
       const ep = `${API_BASE}/v1/api/image64?url=${encodeURIComponent(imgUrl)}`;
-      const r = await fetch(ep, { method: 'GET', mode: 'cors' });
+      const r = await fetch(ep, { method: 'GET', mode: 'cors', headers: AUTH_HEADERS }); // ★ 加上 Auth
       if (!r.ok) throw new Error(`image64 HTTP ${r.status}`);
       const j = await r.json();
       const parsed = parseDataUrl(j.base64);
