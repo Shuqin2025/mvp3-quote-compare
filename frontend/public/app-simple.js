@@ -1,5 +1,5 @@
 // app-simple.js — single UI + i18n + image-embed Excel
-// (2025-09-16, API base is now chosen in a robust, override-able way)
+// API base is chosen in a robust, override-able way.
 
 (() => {
   'use strict';
@@ -7,23 +7,27 @@
   const $ = (s, r = document) => r.querySelector(s);
   const isHttp = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
 
-  // ─────────────────────────── API base selection ───────────────────────────
-  // 1) ?api=...                2) window.__API_BASE__/window.API_BASE
-  // 3) import.meta.env.VITE_API_BASE (打包时注入)   4) <meta name="api-base">
-  // 5) fallback to gateway
+  // ────────────────────── API base selection ──────────────────────
+  // 优先级（从高到低）：
+  // 1) URL 参数    ?api=...
+  // 2) window.__API_BASE__ / window.API_BASE / window.__API_BASE_EFFECTIVE__
+  // 3) import.meta.env.VITE_API_BASE（打包时注入）
+  // 4) <meta name="api-base" content="...">
+  // 5) 回退到 Render 网关
   const apiParam = new URLSearchParams(location.search).get('api');
+
   const fromBoot =
     (typeof window !== 'undefined') &&
     (window.__API_BASE__ || window.API_BASE || window.__API_BASE_EFFECTIVE__);
 
   let fromEnv;
   try {
-    // 在非模块脚本里直接访问 import.meta 可能抛错，所以 try/catch 一下
-    fromEnv = (typeof import !== 'undefined' && typeof import.meta !== 'undefined')
-      ? (import.meta?.env?.VITE_API_BASE)
-      : (void 0);
+    fromEnv =
+      (typeof import !== 'undefined' && typeof import.meta !== 'undefined')
+        ? (import.meta?.env?.VITE_API_BASE)
+        : undefined;
   } catch (_) {
-    fromEnv = void 0;
+    fromEnv = undefined;
   }
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
@@ -31,13 +35,13 @@
   const FALLBACK_GATEWAY = 'https://yunivera-gateway.onrender.com';
 
   const API_BASE =
-    (isHttp(apiParam)   && apiParam)   ||
-    (isHttp(fromBoot)   && fromBoot)   ||
-    (isHttp(fromEnv)    && fromEnv)    ||
-    (isHttp(fromMeta)   && fromMeta)   ||
+    (isHttp(apiParam) && apiParam) ||
+    (isHttp(fromBoot) && fromBoot) ||
+    (isHttp(fromEnv) && fromEnv) ||
+    (isHttp(fromMeta) && fromMeta) ||
     FALLBACK_GATEWAY;
 
-  // 方便在浏览器 Console 里验证
+  // 方便在浏览器 Console 验证
   window.__API_BASE_EFFECTIVE__ = API_BASE;
 
   // ─────────── i18n ───────────
@@ -91,6 +95,7 @@
       failExport: (e) => `Export failed: ${e}`,
     }
   };
+
   let lang = localStorage.getItem('mvp3_lang') || 'zh';
   function applyLang() {
     const t = i18n[lang];
@@ -121,6 +126,7 @@
     if (isCodeLike(fromUrl)) return fromUrl;
     return sku || '';
   };
+
   const parseDataUrl = (dataURL) => {
     const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
     if (!m) return null;
