@@ -1,5 +1,5 @@
 // app-simple.js — single UI + i18n + image-embed Excel
-// API base is chosen in a robust, override-able way.
+// Works as a classic script tag (no import), robust API base selection.
 
 (() => {
   'use strict';
@@ -9,9 +9,9 @@
 
   // ────────────────────── API base selection ──────────────────────
   // 优先级（从高到低）：
-  // 1) URL 参数    ?api=...
+  // 1) URL 参数  ?api=...
   // 2) window.__API_BASE__ / window.API_BASE / window.__API_BASE_EFFECTIVE__
-  // 3) import.meta.env.VITE_API_BASE（打包时注入）
+  // 3) import.meta.env.VITE_API_BASE（打包时注入；若不可用会被忽略）
   // 4) <meta name="api-base" content="...">
   // 5) 回退到 Render 网关
   const apiParam = new URLSearchParams(location.search).get('api');
@@ -22,13 +22,11 @@
 
   let fromEnv;
   try {
-    fromEnv =
-      (typeof import !== 'undefined' && typeof import.meta !== 'undefined')
-        ? (import.meta?.env?.VITE_API_BASE)
-        : undefined;
-  } catch (_) {
-    fromEnv = undefined;
-  }
+    // 在非模块环境下，大多数浏览器仍允许读 import.meta 但没有 env；try/catch 以防兼容
+    fromEnv = (typeof import !== 'undefined' && typeof import.meta !== 'undefined')
+      ? (import.meta?.env?.VITE_API_BASE)
+      : undefined;
+  } catch (_) { fromEnv = undefined; }
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
 
@@ -99,15 +97,15 @@
   let lang = localStorage.getItem('mvp3_lang') || 'zh';
   function applyLang() {
     const t = i18n[lang];
-    $('#title').textContent = t.title;
-    $('#subtitle').textContent = t.subtitle;
-    $('#url').placeholder = t.urlPh;
-    $('#btnFetch').textContent = t.fetch;
-    $('#btnExport').textContent = t.export;
-    $('#btnClear').textContent = t.clear;
-    $('#status').textContent = t.uiNoData;
-    const ths = $('#tbl thead tr').children;
-    t.th.forEach((tx, i) => ths[i].textContent = tx);
+    $('#title')?.textContent = t.title;
+    $('#subtitle')?.textContent = t.subtitle;
+    $('#url')?.setAttribute('placeholder', t.urlPh);
+    $('#btnFetch')?.textContent = t.fetch;
+    $('#btnExport')?.textContent = t.export;
+    $('#btnClear')?.textContent = t.clear;
+    $('#status') && ($('#status').textContent = t.uiNoData);
+    const ths = $('#tbl thead tr')?.children || [];
+    t.th.forEach((tx, i) => ths[i] && (ths[i].textContent = tx));
   }
   $('#langbar')?.addEventListener('click', e => {
     const l = e.target?.dataset?.lang;
@@ -145,6 +143,7 @@
   // ─────────── render table ───────────
   function renderTable() {
     const tb = $('#tbl tbody');
+    if (!tb) return;
     tb.innerHTML = rows.map((r, i) => `
       <tr>
         <td>${i+1}</td>
@@ -162,9 +161,9 @@
   async function doFetch() {
     const t = i18n[lang];
     try {
-      const url = ($('#url').value || '').trim();
+      const url = ($('#url')?.value || '').trim();
       if (!url) return;
-      const limit = parseInt($('#limit').value || '50', 10) || 50;
+      const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
       const ep = `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}&img=base64&imgCount=${limit}`;
       const r = await fetch(ep, { method: 'GET', mode: 'cors' });
@@ -180,11 +179,11 @@
         moq: (x.moq ?? '').toString().trim() || '—',
       }));
       renderTable();
-      $('#status').textContent = t.success(rows.length, Math.min(rows.length, limit));
-      $('#theadNote').textContent = url;
+      $('#status') && ($('#status').textContent = t.success(rows.length, Math.min(rows.length, limit)));
+      $('#theadNote') && ($('#theadNote').textContent = url);
     } catch (e) {
       console.error(e);
-      $('#status').textContent = t.failFetch(e.message || e);
+      $('#status') && ($('#status').textContent = t.failFetch(e.message || e));
     }
   }
 
@@ -260,15 +259,14 @@
     a.click();
     URL.revokeObjectURL(a.href); a.remove();
 
-    const ok = $('#okbar'); ok.textContent = t.okExport; ok.style.display = 'block';
-    setTimeout(() => ok.style.display = 'none', 2000);
+    const ok = $('#okbar'); if (ok) { ok.textContent = t.okExport; ok.style.display = 'block'; setTimeout(() => ok.style.display = 'none', 2000); }
   }
 
   // ─────────── wire up ───────────
-  $('#btnFetch').addEventListener('click', doFetch);
-  $('#btnExport').addEventListener('click', doExport);
-  $('#btnClear').addEventListener('click', () => { rows = []; renderTable(); $('#status').textContent = i18n[lang].uiNoData; });
-  $('#url').addEventListener('keydown', (e) => { if (e.key === 'Enter') doFetch(); });
+  $('#btnFetch')?.addEventListener('click', doFetch);
+  $('#btnExport')?.addEventListener('click', doExport);
+  $('#btnClear')?.addEventListener('click', () => { rows = []; renderTable(); $('#status') && ($('#status').textContent = i18n[lang].uiNoData); });
+  $('#url')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doFetch(); });
 
   // 轻量健康检查（不阻塞）
   (async () => { try { await fetch(`${API_BASE}/health`, { mode: 'cors' }); } catch {} })();
