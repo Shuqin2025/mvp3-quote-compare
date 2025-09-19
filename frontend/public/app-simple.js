@@ -104,12 +104,12 @@
   let lang = localStorage.getItem('mvp3_lang') || 'zh';
   function applyLang() {
     const t = i18n[lang];
-    $('#title')?.textContent = t.title;
-    $('#subtitle')?.textContent = t.subtitle;
+    $('#title').textContent = t.title;
+    $('#subtitle').textContent = t.subtitle;
     $('#url')?.setAttribute('placeholder', t.urlPh);
-    $('#btnFetch')?.textContent = t.fetch;
-    $('#btnExport')?.textContent = t.export;
-    $('#btnClear')?.textContent = t.clear;
+    $('#btnFetch').textContent = t.fetch;
+    $('#btnExport').textContent = t.export;
+    $('#btnClear').textContent = t.clear;
     $('#status') && ($('#status').textContent = t.uiNoData);
     const ths = $('#tbl thead tr')?.children || [];
     t.th.forEach((tx, i) => ths[i] && (ths[i].textContent = tx));
@@ -277,4 +277,3 @@
   // 轻量健康检查（不阻塞）
   (async () => { try { await fetch(`${API_BASE}/health`, { mode: 'cors' }); } catch {} })();
 })();
-
