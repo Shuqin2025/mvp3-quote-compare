@@ -77,10 +77,14 @@
     </div>
   </div>
 
-  <!-- ExcelJS CDN（写入图片用） -->
+  <!-- ExcelJS（若 app-simple.js 内使用 import，请在其中用 `import 'https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js'` 或改为访问 window.ExcelJS） -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
-  <!-- 应用逻辑：语言切换 + 抓取 + 导出(含图片) -->
-  <script src="/app-simple.js?v=2025-09-16"></script>
+
+  <!-- 应用脚本改为模块模式 -->
+  <script type="module" src="/app-simple.js?v=2025-09-16"></script>
+
+  <!-- 旧浏览器兜底提示 -->
+  <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
 
   <!-- ❌ 不要再引入旧的 React 入口，否则会出现双界面 -->
   <!-- <script type="module" src="/src/main.jsx"></script> -->
