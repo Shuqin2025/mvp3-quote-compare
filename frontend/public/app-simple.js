@@ -1,5 +1,5 @@
 // app-simple.js — single UI + i18n + image-embed Excel
-// (2025-09-16, API base is chosen in a robust, override-able way)
+// (2025-09-16, API base selection + auth; 2025-09-20 add /v1 auto-detect & fallback)
 
 (() => {
   'use strict';
@@ -13,14 +13,14 @@
   // 2) window.__API_BASE__ / window.API_BASE / window.__API_BASE_EFFECTIVE__
   // 3) import.meta.env.VITE_API_BASE（打包时注入；若不可用会被忽略）
   // 4) <meta name="api-base" content="...">
-  // 5) 回退到 Render 网关
+  // 5) 回退到 Render 网关（公开）
   const apiParam = new URLSearchParams(location.search).get('api');
 
   const fromBoot =
     (typeof window !== 'undefined') &&
     (window.__API_BASE__ || window.API_BASE || window.__API_BASE_EFFECTIVE__);
 
-  // ✅ 最小修复：只能检测 import.meta，且全链路判空（替换原来的 typeof import !== 'undefined' 写法）
+  // ✅ 只能检测 import.meta，且全链路判空（替换 typeof import !== 'undefined'）
   let fromEnv;
   try {
     const hasImportMeta = (typeof import.meta !== 'undefined');
@@ -36,7 +36,6 @@
   }
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
-
   const FALLBACK_GATEWAY = 'https://yunivera-gateway.onrender.com';
 
   const API_BASE =
@@ -71,6 +70,24 @@
   const AUTH_HEADERS = AUTH ? { Authorization: AUTH } : {};
   // 便于排查
   window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
+
+  // ─────────── 自动探测 /v1 前缀 ───────────
+  let API_PREFIX = '';              // 默认为“无前缀”
+  window.__API_PREFIX__ = API_PREFIX;
+
+  async function detectPrefix() {
+    // 优先尝试 /v1/health（有的环境此路由需要 Basic）
+    try {
+      const r = await fetch(`${API_BASE}/v1/health`, { mode: 'cors', headers: AUTH_HEADERS });
+      if (r.ok) { API_PREFIX = '/v1'; window.__API_PREFIX__ = API_PREFIX; return; }
+    } catch {}
+    // 回退尝试 /health
+    try {
+      const r = await fetch(`${API_BASE}/health`, { mode: 'cors' });
+      if (r.ok) { API_PREFIX = ''; window.__API_PREFIX__ = API_PREFIX; return; }
+    } catch {}
+    // 如果都不通，就维持默认（空前缀），后续 404 会自动再试另一种
+  }
 
   // ─────────── i18n ───────────
   const i18n = {
@@ -186,6 +203,23 @@
     `).join('');
   }
 
+  // ─────────── low-level fetch helper with auto-retry for /v1 prefix ───────────
+  async function fetchJsonWithPrefix(pathWithApi, opts={}) {
+    // 尝试当前前缀
+    let url = `${API_BASE}${API_PREFIX}${pathWithApi}`;
+    let r = await fetch(url, opts);
+    if (r.status === 404) {
+      // 404 时尝试切换前缀再试一次（容错不同网关配置）
+      const alt = (API_PREFIX === '/v1') ? '' : '/v1';
+      try {
+        const r2 = await fetch(`${API_BASE}${alt}${pathWithApi}`, opts);
+        if (r2.ok) { API_PREFIX = alt; window.__API_PREFIX__ = API_PREFIX; return r2; }
+        return r2;
+      } catch (e) { throw e; }
+    }
+    return r;
+  }
+
   // ─────────── fetch catalog (base64 thumbnails) ───────────
   async function doFetch() {
     const t = i18n[lang];
@@ -194,10 +228,13 @@
       if (!url) return;
       const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
-      const ep = `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}&img=base64&imgCount=${limit}`;
-      const r = await fetch(ep, { method: 'GET', mode: 'cors', headers: AUTH_HEADERS }); // ★ 加上 Auth
+      const qs = `?url=${encodeURIComponent(url)}&limit=${limit}&img=base64&imgCount=${limit}`;
+      const ep = `/api/catalog/parse${qs}`;
+
+      const r = await fetchJsonWithPrefix(ep, { method: 'GET', mode: 'cors', headers: AUTH_HEADERS });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
+
       const list = Array.isArray(j?.items) && j.items.length ? j.items : (Array.isArray(j?.products) ? j.products : []);
       rows = list.map(x => ({
         sku: normalizeSku(x),
@@ -250,8 +287,8 @@
     }
 
     async function fetchB64ViaServer(imgUrl) {
-      const ep = `${API_BASE}/v1/api/image64?url=${encodeURIComponent(imgUrl)}`;
-      const r = await fetch(ep, { method: 'GET', mode: 'cors', headers: AUTH_HEADERS }); // ★ 加上 Auth
+      const ep = `/api/image64?url=${encodeURIComponent(imgUrl)}`;
+      const r = await fetchJsonWithPrefix(ep, { method: 'GET', mode: 'cors', headers: AUTH_HEADERS });
       if (!r.ok) throw new Error(`image64 HTTP ${r.status}`);
       const j = await r.json();
       const parsed = parseDataUrl(j.base64);
@@ -297,6 +334,11 @@
   $('#btnClear')?.addEventListener('click', () => { rows = []; renderTable(); $('#status') && ($('#status').textContent = i18n[lang].uiNoData); });
   $('#url')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doFetch(); });
 
-  // 轻量健康检查（不阻塞）
-  (async () => { try { await fetch(`${API_BASE}/health`, { mode: 'cors' }); } catch {} })();
+  // 先探测一次前缀（不阻塞 UI；失败也不影响后续自动重试）
+  detectPrefix().catch(()=>{});
+
+  // 轻量健康检查（使用已探测到的前缀；不阻塞）
+  (async () => {
+    try { await fetch(`${API_BASE}${API_PREFIX}/health`, { mode: 'cors' }); } catch {}
+  })();
 })();
