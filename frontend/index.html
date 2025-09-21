@@ -24,6 +24,10 @@
     .alert.ok{background:#e8f5e9;border:1px solid #c8e6c9;color:#2e7d32}
     .alert.info{background:#fff8e1;border:1px solid #ffe082;color:#6b5900}
   </style>
+
+  <!-- 可选：如果你想把网关地址或临时鉴权硬写在页面，可用这两行（也可以留空，由 app-simple.js 自动探测） -->
+  <!-- <meta name="api-base" content="https://yunivera-gateway.onrender.com"> -->
+  <!-- <meta name="api-auth" content="Basic xxxxxxxxxxx"> -->
 </head>
 <body>
   <div class="wrap">
@@ -77,16 +81,13 @@
     </div>
   </div>
 
-  <!-- ExcelJS（若 app-simple.js 内使用 import，请在其中用 `import 'https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js'` 或改为访问 window.ExcelJS） -->
+  <!-- ExcelJS：供导出 .xlsx 使用 -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
-  <!-- 应用脚本改为模块模式（唯一改动） -->
+  <!-- 以“模块脚本”方式加载应用逻辑（这是关键修改） -->
   <script type="module" src="/app-simple.js?v=2025-09-16"></script>
 
   <!-- 旧浏览器兜底提示 -->
   <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
-
-  <!-- ❌ 不要再引入旧的 React 入口，否则会出现双界面 -->
-  <!-- <script type="module" src="/src/main.jsx"></script> -->
 </body>
 </html>
