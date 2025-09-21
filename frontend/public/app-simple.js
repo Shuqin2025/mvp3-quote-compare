@@ -9,7 +9,7 @@
 
   // ─────────────────────────── API base selection ───────────────────────────
   // 优先级（从高到低）：
-  // 1) URL 参数  ?api=...
+  // 1) URL 参数 ?api=...
   // 2) window.__API_BASE__ / window.API_BASE / window.__API_BASE_EFFECTIVE__
   // 3) import.meta.env.VITE_API_BASE（打包时注入；若不可用会被忽略）
   // 4) <meta name="api-base" content="...">
@@ -31,9 +31,7 @@
       typeof import.meta.env.VITE_API_BASE === 'string' &&
       import.meta.env.VITE_API_BASE
     ) ? import.meta.env.VITE_API_BASE : undefined;
-  } catch (_) {
-    fromEnv = undefined;
-  }
+  } catch (_) { fromEnv = undefined; }
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
   const FALLBACK_GATEWAY = 'https://yunivera-gateway.onrender.com';
@@ -45,7 +43,7 @@
     (isHttp(fromMeta) && fromMeta) ||
     FALLBACK_GATEWAY;
 
-  // 方便在浏览器 Console 里验证
+  // 方便 Console 验证
   window.__API_BASE_EFFECTIVE__ = API_BASE;
 
   // ─────────────────────────── Authorization（可选） ───────────────────────────
@@ -68,77 +66,44 @@
     (fromLocalAuth && String(fromLocalAuth)) || '';
 
   const AUTH_HEADERS = AUTH ? { Authorization: AUTH } : {};
-  // 便于排查
   window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
 
   // ─────────── 自动探测 /v1 前缀 ───────────
-  let API_PREFIX = '';              // 默认为“无前缀”
+  let API_PREFIX = '';              // 默认“无前缀”
   window.__API_PREFIX__ = API_PREFIX;
 
   async function detectPrefix() {
-    // 优先尝试 /v1/health（有的环境此路由需要 Basic）
     try {
       const r = await fetch(`${API_BASE}/v1/health`, { mode: 'cors', headers: AUTH_HEADERS });
       if (r.ok) { API_PREFIX = '/v1'; window.__API_PREFIX__ = API_PREFIX; return; }
     } catch {}
-    // 回退尝试 /health
     try {
       const r = await fetch(`${API_BASE}/health`, { mode: 'cors' });
       if (r.ok) { API_PREFIX = ''; window.__API_PREFIX__ = API_PREFIX; return; }
     } catch {}
-    // 如果都不通，就维持默认（空前缀），后续 404 会自动再试另一种
   }
 
   // ─────────── i18n ───────────
   const i18n = {
-    zh: {
-      title: '云贸星 智能表格生成器',
-      subtitle: '输入目录型网页链接，秒生成 Excel 产品表格。',
-      urlPh: '在此粘贴目录型页面链接（例如某一类目的商品列表页）',
-      fetch: '抓取目录',
-      export: '导出 Excel（.xlsx）',
-      clear: '清空数据',
-      th: ['#','货号','图片','描述','起订量','单价','链接'],
-      okExport: '已导出 Excel（含图片、价格占位符）。',
-      success: (n, m) => `抓取成功：共 ${n} 条（预览前 ${m} 条）`,
-      pleaseFetch: '请先抓取目录再导出。',
-      linkText: '链接',
-      uiNoData: 'ui_no_data',
-      failFetch: (e) => `抓取失败：${e}`,
-      failExport: (e) => `导出失败：${e}`,
-    },
-    de: {
-      title: 'Yunivera · Intelligenter Tabellen-Generator',
-      subtitle: 'Fügen Sie einen Katalog-Link ein und erzeugen Sie sofort eine Excel-Tabelle.',
-      urlPh: 'Katalog-/Kategorie-URL hier einfügen',
-      fetch: 'Katalog abrufen',
-      export: 'Excel exportieren (.xlsx)',
-      clear: 'Daten leeren',
-      th: ['#','Artikel-Nr.','Bild','Beschreibung','MOQ','Einzelpreis','Link'],
-      okExport: 'Excel exportiert (mit Bildern).',
-      success: (n, m) => `Erfolg: Insgesamt ${n} Einträge (zeige ${m}).`,
-      pleaseFetch: 'Bitte zuerst Katalog abrufen.',
-      linkText: 'Link',
-      uiNoData: 'ui_no_data',
-      failFetch: (e) => `Abruf fehlgeschlagen: ${e}`,
-      failExport: (e) => `Export fehlgeschlagen: ${e}`,
-    },
-    en: {
-      title: 'Yunivera · Smart Sheet Builder',
-      subtitle: 'Paste a catalog URL and instantly create an Excel sheet.',
-      urlPh: 'Paste a category/listing page URL here',
-      fetch: 'Fetch Catalog',
-      export: 'Export Excel (.xlsx)',
-      clear: 'Clear',
-      th: ['#','Item No.','Picture','Description','MOQ','Unit Price','Link'],
-      okExport: 'Excel exported (with images).',
-      success: (n, m) => `Success: ${n} items (showing ${m}).`,
-      pleaseFetch: 'Fetch catalog before export.',
-      linkText: 'Link',
-      uiNoData: 'ui_no_data',
-      failFetch: (e) => `Fetch failed: ${e}`,
-      failExport: (e) => `Export failed: ${e}`,
-    }
+    zh: { title:'云贸星 智能表格生成器', subtitle:'输入目录型网页链接，秒生成 Excel 产品表格。',
+      urlPh:'在此粘贴目录型页面链接（例如某一类目的商品列表页）', fetch:'抓取目录', export:'导出 Excel（.xlsx）',
+      clear:'清空数据', th:['#','货号','图片','描述','起订量','单价','链接'],
+      okExport:'已导出 Excel（含图片、价格占位符）。',
+      success:(n,m)=>`抓取成功：共 ${n} 条（预览前 ${m} 条）`, pleaseFetch:'请先抓取目录再导出。',
+      linkText:'链接', uiNoData:'ui_no_data', failFetch:e=>`抓取失败：${e}`, failExport:e=>`导出失败：${e}` },
+    de: { title:'Yunivera · Intelligenter Tabellen-Generator',
+      subtitle:'Fügen Sie einen Katalog-Link ein und erzeugen Sie sofort eine Excel-Tabelle.',
+      urlPh:'Katalog-/Kategorie-URL hier einfügen', fetch:'Katalog abrufen', export:'Excel exportieren (.xlsx)',
+      clear:'Daten leeren', th:['#','Artikel-Nr.','Bild','Beschreibung','MOQ','Einzelpreis','Link'],
+      okExport:'Excel exportiert (mit Bildern).',
+      success:(n,m)=>`Erfolg: Insgesamt ${n} Einträge (zeige ${m}).`, pleaseFetch:'Bitte zuerst Katalog abrufen.',
+      linkText:'Link', uiNoData:'ui_no_data', failFetch:e=>`Abruf fehlgeschlagen: ${e}`, failExport:e=>`Export fehlgeschlagen: ${e}` },
+    en: { title:'Yunivera · Smart Sheet Builder', subtitle:'Paste a catalog URL and instantly create an Excel sheet.',
+      urlPh:'Paste a category/listing page URL here', fetch:'Fetch Catalog', export:'Export Excel (.xlsx)',
+      clear:'Clear', th:['#','Item No.','Picture','Description','MOQ','Unit Price','Link'],
+      okExport:'Excel exported (with images).',
+      success:(n,m)=>`Success: ${n} items (showing ${m}).`, pleaseFetch:'Fetch catalog before export.',
+      linkText:'Link', uiNoData:'ui_no_data', failFetch:e=>`Fetch failed: ${e}`, failExport:e=>`Export failed: ${e}` },
   };
 
   let lang = localStorage.getItem('mvp3_lang') || 'zh';
@@ -161,7 +126,7 @@
   });
   applyLang();
 
-  // ─────────── helpers ───────────
+  // helpers
   const isCodeLike = s => /^\s*\d+(?:-\d+)*\s*$/.test(String(s || ''));
   const idFromUrl = (u='') => { const m = /,(\d+)\.html(?:[?#].*)?$/i.exec(u); return m ? m[1] : ''; };
   const normalizeSku = it => {
@@ -183,10 +148,8 @@
     return { raw: m[2], ext };
   };
 
-  // ─────────── state ───────────
   let rows = [];
 
-  // ─────────── render table ───────────
   function renderTable() {
     const tb = $('#tbl tbody');
     if (!tb) return;
@@ -203,13 +166,11 @@
     `).join('');
   }
 
-  // ─────────── low-level fetch helper with auto-retry for /v1 prefix ───────────
+  // 低层 fetch，404 时自动换 /v1 与否
   async function fetchJsonWithPrefix(pathWithApi, opts={}) {
-    // 尝试当前前缀
     let url = `${API_BASE}${API_PREFIX}${pathWithApi}`;
     let r = await fetch(url, opts);
     if (r.status === 404) {
-      // 404 时尝试切换前缀再试一次（容错不同网关配置）
       const alt = (API_PREFIX === '/v1') ? '' : '/v1';
       try {
         const r2 = await fetch(`${API_BASE}${alt}${pathWithApi}`, opts);
@@ -220,7 +181,7 @@
     return r;
   }
 
-  // ─────────── fetch catalog (base64 thumbnails) ───────────
+  // 抓取目录
   async function doFetch() {
     const t = i18n[lang];
     try {
@@ -253,7 +214,7 @@
     }
   }
 
-  // ─────────── export to Excel (embed images) ───────────
+  // 导出 Excel（内嵌图片）
   async function doExport() {
     const t = i18n[lang];
     if (!rows.length) { alert(t.pleaseFetch); return; }
@@ -328,17 +289,15 @@
     const ok = $('#okbar'); if (ok) { ok.textContent = t.okExport; ok.style.display = 'block'; setTimeout(() => ok.style.display = 'none', 2000); }
   }
 
-  // ─────────── wire up ───────────
+  // 绑定
   $('#btnFetch')?.addEventListener('click', doFetch);
   $('#btnExport')?.addEventListener('click', doExport);
   $('#btnClear')?.addEventListener('click', () => { rows = []; renderTable(); $('#status') && ($('#status').textContent = i18n[lang].uiNoData); });
   $('#url')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doFetch(); });
 
-  // 先探测一次前缀（不阻塞 UI；失败也不影响后续自动重试）
+  // 先探测一次前缀（不阻塞 UI）
   detectPrefix().catch(()=>{});
 
-  // 轻量健康检查（使用已探测到的前缀；不阻塞）
-  (async () => {
-    try { await fetch(`${API_BASE}${API_PREFIX}/health`, { mode: 'cors' }); } catch {}
-  })();
+  // 轻量健康检查（不阻塞）
+  (async () => { try { await fetch(`${API_BASE}${API_PREFIX}/health`, { mode: 'cors' }); } catch {} })();
 })();
