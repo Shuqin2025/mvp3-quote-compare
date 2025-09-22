@@ -1,5 +1,5 @@
 // app-simple.js — single UI + i18n + image-embed Excel
-// (2025-09-16, API base selection + auth; 2025-09-20 add /v1 auto-detect & fallback)
+// 2025-09-20：默认用 POST /api/catalog/parse；404 时自动切换是否带 /v1
 
 (() => {
   'use strict';
@@ -7,31 +7,17 @@
   const $ = (s, r = document) => r.querySelector(s);
   const isHttp = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
 
-  // ─────────────────────────── API base selection ───────────────────────────
-  // 优先级（从高到低）：
-  // 1) URL 参数 ?api=...
-  // 2) window.__API_BASE__ / window.API_BASE / window.__API_BASE_EFFECTIVE__
-  // 3) import.meta.env.VITE_API_BASE（打包时注入；若不可用会被忽略）
-  // 4) <meta name="api-base" content="...">
-  // 5) 回退到 Render 网关（公开）
+  // ───────── API base 选择 ─────────
   const apiParam = new URLSearchParams(location.search).get('api');
-
   const fromBoot =
     (typeof window !== 'undefined') &&
     (window.__API_BASE__ || window.API_BASE || window.__API_BASE_EFFECTIVE__);
 
-  // ✅ 只能检测 import.meta，且全链路判空（替换 typeof import !== 'undefined'）
   let fromEnv;
   try {
     const hasImportMeta = (typeof import.meta !== 'undefined');
-    fromEnv = (
-      hasImportMeta &&
-      import.meta &&
-      import.meta.env &&
-      typeof import.meta.env.VITE_API_BASE === 'string' &&
-      import.meta.env.VITE_API_BASE
-    ) ? import.meta.env.VITE_API_BASE : undefined;
-  } catch (_) { fromEnv = undefined; }
+    fromEnv = (hasImportMeta && import.meta?.env?.VITE_API_BASE) ? import.meta.env.VITE_API_BASE : undefined;
+  } catch { fromEnv = undefined; }
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
   const FALLBACK_GATEWAY = 'https://yunivera-gateway.onrender.com';
@@ -43,11 +29,9 @@
     (isHttp(fromMeta) && fromMeta) ||
     FALLBACK_GATEWAY;
 
-  // 方便 Console 验证
   window.__API_BASE_EFFECTIVE__ = API_BASE;
 
-  // ─────────────────────────── Authorization（可选） ───────────────────────────
-  // 读取顺序：URL ?auth=... → window.__API_AUTH__/API_AUTH → env.VITE_API_AUTH → <meta name="api-auth"> → localStorage("mvp3_auth")
+  // ───────── Authorization（可选） ─────────
   const authParam = new URLSearchParams(location.search).get('auth');
   const fromBootAuth = (typeof window !== 'undefined') && (window.__API_AUTH__ || window.API_AUTH);
   let fromEnvAuth;
@@ -68,8 +52,8 @@
   const AUTH_HEADERS = AUTH ? { Authorization: AUTH } : {};
   window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
 
-  // ─────────── 自动探测 /v1 前缀 ───────────
-  let API_PREFIX = '';              // 默认“无前缀”
+  // ───────── 自动探测 /v1 前缀 ─────────
+  let API_PREFIX = '';
   window.__API_PREFIX__ = API_PREFIX;
 
   async function detectPrefix() {
@@ -83,7 +67,7 @@
     } catch {}
   }
 
-  // ─────────── i18n ───────────
+  // ───────── i18n ─────────
   const i18n = {
     zh: { title:'云贸星 智能表格生成器', subtitle:'输入目录型网页链接，秒生成 Excel 产品表格。',
       urlPh:'在此粘贴目录型页面链接（例如某一类目的商品列表页）', fetch:'抓取目录', export:'导出 Excel（.xlsx）',
@@ -166,7 +150,7 @@
     `).join('');
   }
 
-  // 低层 fetch，404 时自动换 /v1 与否
+  // 低层 fetch：404 时尝试切换 /v1 前缀
   async function fetchJsonWithPrefix(pathWithApi, opts={}) {
     let url = `${API_BASE}${API_PREFIX}${pathWithApi}`;
     let r = await fetch(url, opts);
@@ -181,7 +165,7 @@
     return r;
   }
 
-  // 抓取目录
+  // 抓取目录（POST）
   async function doFetch() {
     const t = i18n[lang];
     try {
@@ -189,10 +173,14 @@
       if (!url) return;
       const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
-      const qs = `?url=${encodeURIComponent(url)}&limit=${limit}&img=base64&imgCount=${limit}`;
-      const ep = `/api/catalog/parse${qs}`;
-
-      const r = await fetchJsonWithPrefix(ep, { method: 'GET', mode: 'cors', headers: AUTH_HEADERS });
+      const ep = `/api/catalog/parse`;
+      const payload = { url, limit, img: 'base64', imgCount: limit };
+      const r = await fetchJsonWithPrefix(ep, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json', ...AUTH_HEADERS },
+        body: JSON.stringify(payload),
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
 
@@ -214,7 +202,7 @@
     }
   }
 
-  // 导出 Excel（内嵌图片）
+  // 导出 Excel（内嵌图片，需要 /api/image64 支持）
   async function doExport() {
     const t = i18n[lang];
     if (!rows.length) { alert(t.pleaseFetch); return; }
@@ -246,6 +234,18 @@
       rr.height = 78;
       metas.push({ row: rr.number, img: r.img });
     }
+
+    const parseDataUrl = (dataURL) => {
+      const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
+      if (!m) return null;
+      const ct = m[1].toLowerCase();
+      let ext = 'jpeg';
+      if (ct.includes('png')) ext = 'png';
+      else if (ct.includes('webp')) ext = 'webp';
+      else if (ct.includes('gif')) ext = 'gif';
+      else if (ct.includes('bmp')) ext = 'bmp';
+      return { raw: m[2], ext };
+    };
 
     async function fetchB64ViaServer(imgUrl) {
       const ep = `/api/image64?url=${encodeURIComponent(imgUrl)}`;
