@@ -75,7 +75,7 @@
       okExport:'已导出 Excel（含图片、价格占位符）。',
       success:(n,m)=>`抓取成功：共 ${n} 条（预览前 ${m} 条）`, pleaseFetch:'请先抓取目录再导出。',
       linkText:'链接', uiNoData:'ui_no_data', failFetch:e=>`抓取失败：${e}`, failExport:e=>`导出失败：${e}`,
-      loading:'抓取中…（详情覆写 SKU，可能需要十几秒）' },
+      loading:'抓取中…（如需从详情覆写 SKU，可能需要十几秒）' },
     de: { title:'Yunivera · Intelligenter Tabellen-Generator',
       subtitle:'Fügen Sie einen Katalog-Link ein und erzeugen Sie sofort eine Excel-Tabelle.',
       urlPh:'Katalog-/Kategorie-URL hier einfügen', fetch:'Katalog abrufen', export:'Excel exportieren (.xlsx)',
@@ -83,14 +83,14 @@
       okExport:'Excel exportiert (mit Bildern).',
       success:(n,m)=>`Erfolg: Insgesamt ${n} Einträge (zeige ${m}).`, pleaseFetch:'Bitte zuerst Katalog abrufen.',
       linkText:'Link', uiNoData:'ui_no_data', failFetch:e=>`Abruf fehlgeschlagen: ${e}`, failExport:e=>`Export fehlgeschlagen: ${e}`,
-      loading:'Abruf läuft… (SKU aus Detailseite, kann einige Sekunden dauern)' },
+      loading:'Abruf läuft… (falls SKU aus Detailseite überschrieben wird, kann es einige Sekunden dauern)' },
     en: { title:'Yunivera · Smart Sheet Builder', subtitle:'Paste a catalog URL and instantly create an Excel sheet.',
       urlPh:'Paste a category/listing page URL here', fetch:'Fetch Catalog', export:'Export Excel (.xlsx)',
       clear:'Clear', th:['#','Item No.','Picture','Description','MOQ','Unit Price','Link'],
       okExport:'Excel exported (with images).',
       success:(n,m)=>`Success: ${n} items (showing ${m}).`, pleaseFetch:'Fetch catalog before export.',
       linkText:'Link', uiNoData:'ui_no_data', failFetch:e=>`Fetch failed: ${e}`, failExport:e=>`Export failed: ${e}`,
-      loading:'Fetching… (overwriting SKU from detail pages may take some seconds)' },
+      loading:'Fetching… (if overwriting SKU from details, it may take a few seconds)' },
   };
 
   let lang = localStorage.getItem('mvp3_lang') || 'zh';
@@ -123,20 +123,8 @@
     if (isCodeLike(fromUrl)) return fromUrl;
     return sku || '';
   };
-  const parseDataUrl = (dataURL) => {
-    const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
-    if (!m) return null;
-    const ct = m[1].toLowerCase();
-    let ext = 'jpeg';
-    if (ct.includes('png')) ext = 'png';
-    else if (ct.includes('webp')) ext = 'webp';
-    else if (ct.includes('gif')) ext = 'gif';
-    else if (ct.includes('bmp')) ext = 'bmp';
-    return { raw: m[2], ext };
-  };
 
   let rows = [];
-
   function renderTable() {
     const tb = $('#tbl tbody');
     if (!tb) return;
@@ -168,7 +156,7 @@
     return r;
   }
 
-  // 抓取目录（POST + fast 透传）
+  // 抓取目录（POST）
   async function doFetch() {
     const t = i18n[lang];
     const btn = $('#btnFetch');
@@ -183,9 +171,8 @@
       if (btn) { btn.disabled = true; btn.textContent = t.fetch + '…'; }
       if (status) status.textContent = t.loading;
 
-      const qs = $('#fastMode')?.checked ? '?fast=1' : '';
-      const ep = `/api/catalog/parse${qs}`;
-      const payload = { url, limit, img: 'base64', imgCount: limit };
+      const ep = `/api/catalog/parse`;
+      const payload = { url, limit };      // ← 仅传 url + limit
       const r = await fetchJsonWithPrefix(ep, {
         method: 'POST',
         mode: 'cors',
@@ -215,7 +202,7 @@
     }
   }
 
-  // 导出 Excel（内嵌图片，需要 /api/image64 支持）
+  // 导出 Excel（按需走 /api/image64 取图）
   async function doExport() {
     const t = i18n[lang];
     if (!rows.length) { alert(t.pleaseFetch); return; }
