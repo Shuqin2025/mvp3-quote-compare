@@ -74,20 +74,23 @@
       clear:'清空数据', th:['#','货号','图片','描述','起订量','单价','链接'],
       okExport:'已导出 Excel（含图片、价格占位符）。',
       success:(n,m)=>`抓取成功：共 ${n} 条（预览前 ${m} 条）`, pleaseFetch:'请先抓取目录再导出。',
-      linkText:'链接', uiNoData:'ui_no_data', failFetch:e=>`抓取失败：${e}`, failExport:e=>`导出失败：${e}` },
+      linkText:'链接', uiNoData:'ui_no_data', failFetch:e=>`抓取失败：${e}`, failExport:e=>`导出失败：${e}`,
+      loading:'抓取中…（详情覆写 SKU，可能需要十几秒）' },
     de: { title:'Yunivera · Intelligenter Tabellen-Generator',
       subtitle:'Fügen Sie einen Katalog-Link ein und erzeugen Sie sofort eine Excel-Tabelle.',
       urlPh:'Katalog-/Kategorie-URL hier einfügen', fetch:'Katalog abrufen', export:'Excel exportieren (.xlsx)',
       clear:'Daten leeren', th:['#','Artikel-Nr.','Bild','Beschreibung','MOQ','Einzelpreis','Link'],
       okExport:'Excel exportiert (mit Bildern).',
       success:(n,m)=>`Erfolg: Insgesamt ${n} Einträge (zeige ${m}).`, pleaseFetch:'Bitte zuerst Katalog abrufen.',
-      linkText:'Link', uiNoData:'ui_no_data', failFetch:e=>`Abruf fehlgeschlagen: ${e}`, failExport:e=>`Export fehlgeschlagen: ${e}` },
+      linkText:'Link', uiNoData:'ui_no_data', failFetch:e=>`Abruf fehlgeschlagen: ${e}`, failExport:e=>`Export fehlgeschlagen: ${e}`,
+      loading:'Abruf läuft… (SKU aus Detailseite, kann einige Sekunden dauern)' },
     en: { title:'Yunivera · Smart Sheet Builder', subtitle:'Paste a catalog URL and instantly create an Excel sheet.',
       urlPh:'Paste a category/listing page URL here', fetch:'Fetch Catalog', export:'Export Excel (.xlsx)',
       clear:'Clear', th:['#','Item No.','Picture','Description','MOQ','Unit Price','Link'],
       okExport:'Excel exported (with images).',
       success:(n,m)=>`Success: ${n} items (showing ${m}).`, pleaseFetch:'Fetch catalog before export.',
-      linkText:'Link', uiNoData:'ui_no_data', failFetch:e=>`Fetch failed: ${e}`, failExport:e=>`Export failed: ${e}` },
+      linkText:'Link', uiNoData:'ui_no_data', failFetch:e=>`Fetch failed: ${e}`, failExport:e=>`Export failed: ${e}`,
+      loading:'Fetching… (overwriting SKU from detail pages may take some seconds)' },
   };
 
   let lang = localStorage.getItem('mvp3_lang') || 'zh';
@@ -165,15 +168,23 @@
     return r;
   }
 
-  // 抓取目录（POST）
+  // 抓取目录（POST + fast 透传）
   async function doFetch() {
     const t = i18n[lang];
+    const btn = $('#btnFetch');
+    const status = $('#status');
+
     try {
       const url = ($('#url')?.value || '').trim();
       if (!url) return;
       const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
-      const ep = `/api/catalog/parse`;
+      // Loading UI
+      if (btn) { btn.disabled = true; btn.textContent = t.fetch + '…'; }
+      if (status) status.textContent = t.loading;
+
+      const qs = $('#fastMode')?.checked ? '?fast=1' : '';
+      const ep = `/api/catalog/parse${qs}`;
       const payload = { url, limit, img: 'base64', imgCount: limit };
       const r = await fetchJsonWithPrefix(ep, {
         method: 'POST',
@@ -199,6 +210,8 @@
     } catch (e) {
       console.error(e);
       $('#status') && ($('#status').textContent = t.failFetch(e.message || e));
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = i18n[lang].fetch; }
     }
   }
 
