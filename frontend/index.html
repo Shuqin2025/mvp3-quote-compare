@@ -45,13 +45,6 @@
     <div class="row" style="margin-top:16px">
       <input id="url" class="input" placeholder="在此粘贴目录型页面链接（例如某一类目的商品列表页）">
       <button id="btnFetch" class="btn primary">抓取目录</button>
-
-      <!-- ⭐ 新增：快速模式 -->
-      <label class="btn" style="display:flex;align-items:center;gap:6px;cursor:pointer">
-        <input id="fastMode" type="checkbox" />
-        <span>⚡️快速模式</span>
-      </label>
-
       <select id="limit" class="btn"><option>50</option><option>100</option><option>200</option></select>
       <button id="btnExport" class="btn">导出 Excel（.xlsx）</button>
       <button id="btnClear" class="btn">清空数据</button>
@@ -91,8 +84,8 @@
   <!-- ExcelJS：供导出 .xlsx 使用 -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
-  <!-- 以“模块脚本”方式加载应用逻辑 -->
-  <script type="module" src="/app-simple.js?v=2025-10-04"></script>
+  <!-- 以“模块脚本”方式加载应用逻辑（这是关键修改） -->
+  <script type="module" src="/app-simple.js?v=2025-09-16"></script>
 
   <!-- 旧浏览器兜底提示 -->
   <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
