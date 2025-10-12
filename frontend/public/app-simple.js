@@ -218,7 +218,7 @@
       if (btn) { btn.disabled = true; btn.textContent = t.fetch + '…'; }
       if (status) status.textContent = t.loading;
 
-      const ep = `/api/catalog/parse`;
+     const ep = `/catalog/parse`;
       const payload = { url, limit }; // 简洁参数
       const r = await fetchJsonWithPrefix(ep, {
         method: 'POST',
