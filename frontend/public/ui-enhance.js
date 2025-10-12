@@ -136,7 +136,7 @@
       });
 
       if (!res.ok) {
-        const text = await res.text().catch(()=>'');
+        const text = await res.text().catch(()=> '');
         throw new Error(`网关返回 ${res.status}：${text || res.statusText}`);
       }
 
