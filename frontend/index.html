@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>云贸星 · 智能表格生成器</title>
 
+  <!-- 消除 favicon 404 噪声 -->
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
+
   <style>
     body{background:#fafafa;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
     .wrap{max-width:980px;margin:0 auto;padding:32px 20px}
@@ -25,7 +28,7 @@
     .alert.info{background:#fff8e1;border:1px solid #ffe082;color:#6b5900}
   </style>
 
-  <!-- 可选：如果你想把网关地址或临时鉴权硬写在页面，可用这两行（也可以留空，由 app-simple.js 自动探测） -->
+  <!-- 可选：如果想把网关地址或临时鉴权硬写在页面，可用这两行（也可以留空，由 app-simple.js 自动探测 ?api=） -->
   <!-- <meta name="api-base" content="https://yunivera-gateway.onrender.com"> -->
   <!-- <meta name="api-auth" content="Basic xxxxxxxxxxx"> -->
 </head>
@@ -84,8 +87,11 @@
   <!-- ExcelJS：供导出 .xlsx 使用 -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
-  <!-- 以“模块脚本”方式加载应用逻辑（这是关键修改） -->
-  <script type="module" src="/app-simple.js?v=2025-09-16"></script>
+  <!-- 核心应用逻辑（模块脚本） -->
+  <script type="module" src="./app-simple.js?v=2025-09-16"></script>
+
+  <!-- UI 增强脚本（模块脚本）※ 关键：之前缺少了它 -->
+  <script type="module" src="./ui-enhance.js?v=2025-10-12-4"></script>
 
   <!-- 旧浏览器兜底提示 -->
   <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
