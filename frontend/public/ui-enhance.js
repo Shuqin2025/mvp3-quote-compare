@@ -25,7 +25,7 @@
 
   // 一些容器/控件选择（尽量兼容旧 DOM）
   const els = {
-    urlInput: $('#url') || $('input[type="url"], input[name="url"]') || $('input'),
+    urlInput: $('#txtUrl') || $('#url') || $('input[type="url"], input[name="url"]') || $('input'),
     btnFetch: $('#btnFetch') || $$('.btn').find(b => /抓取/.test(b?.textContent||"")),
     selectLimit: $('#pageSize') || $('select'),
     btnExport: $('#btnExport') || $$('.btn').find(b => /导出|Export/i.test(b?.textContent||"")),
@@ -81,7 +81,9 @@
       if (r.img) {
         const img = document.createElement('img');
         // 统一使用网关图片代理，避免跨域
-        const imgUrl = `${API_BASE}/v1/api/image?url=${encodeURIComponent(r.img)}`;
+        const imgUrl = API_BASE
+  ? `${API_BASE}/v1/api/image?url=${encodeURIComponent(r.img)}`
+  : r.img;
         img.src = imgUrl;
         img.alt = r.title || '';
         img.referrerPolicy = 'no-referrer';
@@ -232,37 +234,24 @@
 
     setToast('正在检测页面类型…');
     clearTable();
+// 新增：抓取期间禁用按钮
+  els.btnFetch && (els.btnFetch.disabled = true);
 
-    let type = await detectType(url);
-    // 将检测到的 type 映射为 t；未知则不带 t，让后端自己兜底
-    const t = TYPE_TO_T[type] || '';
+  let type = await detectType(url);
+  const t = TYPE_TO_T[type] || '';
 
-    try {
-      setToast(`正在抓取（${type || '通用模式'}）…`);
-      const data = await parseCatalog(url, limit, t);
-      if (!data?.ok) {
-        setToast(`抓取失败：${data?.error || 'unknown'}`, false);
-        return;
-      }
-
-      const list = Array.isArray(data.products) ? data.products : [];
-      // 如果后端返回的是“通用 a 标签列表”（常见为空 sku、无价），提醒用户可能未识别
-      const looksLikeGeneric =
-        list.length && list.every(x => !x.price && !x.sku && !x.moq);
-
-      if (!list.length || looksLikeGeneric) {
-        setToast('已抓取但未识别为电商目录（或解析模板不匹配），返回了页面链接列表。建议更换目录链接或稍后再试。', false);
-      } else {
-        setToast(`抓取成功：共 ${list.length} 条（预览前 ${Math.min(list.length, limit)} 条）`);
-      }
-
-      // 渲染（不管是不是通用列表，仍然展示）
-      renderRows(list.slice(0, limit));
-    } catch (e) {
-      console.error(e);
-      setToast('抓取失败：' + e.message, false);
-    }
-  };
+  try {
+    setToast(`正在抓取（${type || '通用模式'}）…`);
+    const data = await parseCatalog(url, limit, t);
+    ...
+  } catch (e) {
+    console.error(e);
+    setToast('抓取失败：' + e.message, false);
+  } finally {
+    // 新增：恢复按钮
+    els.btnFetch && (els.btnFetch.disabled = false);
+  }
+};
 
   // ---------------- 绑定事件 ----------------
   els.btnFetch?.addEventListener('click', fetchCatalog);
