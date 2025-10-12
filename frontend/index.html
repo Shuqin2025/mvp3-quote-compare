@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>云贸星 · 智能表格生成器</title>
 
-  <!-- 消除 favicon 404 噪声 -->
+  <!-- 避免 favicon 404 噪声 -->
   <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
 
   <style>
@@ -27,14 +27,9 @@
     .alert.ok{background:#e8f5e9;border:1px solid #c8e6c9;color:#2e7d32}
     .alert.info{background:#fff8e1;border:1px solid #ffe082;color:#6b5900}
   </style>
-
-  <!-- 可选：如果想把网关地址或临时鉴权硬写在页面，可用这两行（也可以留空，由 app-simple.js 自动探测 ?api=） -->
-  <!-- <meta name="api-base" content="https://yunivera-gateway.onrender.com"> -->
-  <!-- <meta name="api-auth" content="Basic xxxxxxxxxxx"> -->
 </head>
 <body>
   <div class="wrap">
-    <!-- 语言切换 -->
     <div class="row" id="langbar">
       <button class="btn" data-lang="zh">CN 中文</button>
       <button class="btn" data-lang="de">DE Deutsch</button>
@@ -44,7 +39,6 @@
     <h1 id="title" style="margin:16px 0 4px;font-size:24px;font-weight:700">云贸星 智能表格生成器</h1>
     <div id="subtitle" style="color:#6b7280">输入目录型网页链接，秒生成 Excel 产品表格。</div>
 
-    <!-- 工具条 -->
     <div class="row" style="margin-top:16px">
       <input id="url" class="input" placeholder="在此粘贴目录型页面链接（例如某一类目的商品列表页）">
       <button id="btnFetch" class="btn primary">抓取目录</button>
@@ -53,11 +47,9 @@
       <button id="btnClear" class="btn">清空数据</button>
     </div>
 
-    <!-- 状态条 -->
     <div id="status" class="alert info">ui_no_data</div>
     <div id="okbar" class="alert ok" style="display:none"></div>
 
-    <!-- 表格 -->
     <div class="card">
       <div class="card-head" id="theadNote">—</div>
       <div class="card-body">
@@ -78,22 +70,18 @@
       </div>
     </div>
 
-    <!-- 页脚 -->
     <div style="margin-top:24px;color:#6b7280;font-size:14px" class="row">
       <a href="#">支持的网站</a><a href="#">隐私政策</a><a href="#">联系我们</a>
     </div>
   </div>
 
-  <!-- ExcelJS：供导出 .xlsx 使用 -->
+  <!-- ExcelJS（导出 .xlsx 用） -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
-  <!-- 核心应用逻辑（模块脚本） -->
-  <script type="module" src="./app-simple.js?v=2025-09-16"></script>
+  <!-- 从 public 根引用（关键修复点） -->
+  <script type="module" src="/app-simple.js?v=2025-09-16"></script>
+  <script type="module" src="/ui-enhance.js?v=2025-10-12-4"></script>
 
-  <!-- UI 增强脚本（模块脚本）※ 关键：之前缺少了它 -->
-  <script type="module" src="./ui-enhance.js?v=2025-10-12-4"></script>
-
-  <!-- 旧浏览器兜底提示 -->
   <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
 </body>
 </html>
