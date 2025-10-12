@@ -1,270 +1,280 @@
 /**
- * MVP3 前端增强脚本（完整替换版）
- * - 读取 ?api= 指向的网关根，例如 ?api=https://yunivera-gateway.onrender.com
- * - 仅通过网关抓取：POST /v1/api/catalog/parse
- * - 图片展示统一走 /v1/api/image?url=...
- * - 导出：若检测到 ExcelJS 则导出 .xlsx（可尝试嵌入图片 Base64），否则回退 CSV
+ * MVP3 前端增强脚本（完整替换版 · 仅做必要改动）
+ * - 自动读取 ?api= 网关根，例如 ?api=https://yunivera-gateway.onrender.com
+ * - 流程：detect -> parse（GET，避免 preflight）
+ * - 图片：统一使用 /v1/api/image?url=...
+ * - 导出：若存在 ExcelJS 则导出 .xlsx，否则回退 CSV
  */
 (() => {
-  // ---------- helpers ----------
+  // ---------------- helpers ----------------
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  const els = {
-    url: $('#url') || $('input[type="url"], input[name="url"]'),
-    btnFetch: $('#btnFetch') || $('#抓取目录') || $$('.btn').find(b => /抓取/.test(b?.textContent || '')),
-    pageSize: $('#pageSize') || $('select'),
-    btnExport: $('#btnExport') || $$('.btn').find(b => /导出/i.test(b?.textContent || '')),
-    btnClear: $('#btnClear') || $$('.btn').find(b => /清空/.test(b?.textContent || '')),
-    toast: $('#toast') || $('.toast') || $('.alert'),
-    tbody: $('#grid tbody') || $('table tbody'),
-    table: $('#grid') || $('table'),
-  };
-
-  function showToast(msg, type = 'info') {
-    // 页面已有提示条就复用，否则临时创建
-    let bar = els.toast;
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.style.cssText = 'margin:12px 0;padding:10px;border-radius:6px;background:#f6f7f9;color:#333;';
-      els.table?.parentElement?.insertBefore(bar, els.table);
-      els.toast = bar;
-    }
-    bar.textContent = msg;
-    bar.style.background = type === 'ok' ? '#e8fff2' : type === 'warn' ? '#fff7e6' : type === 'err' ? '#ffecec' : '#f6f7f9';
-  }
-
-  function getApiBase() {
-    const u = new URL(location.href);
-    const api = u.searchParams.get('api')?.trim();
-    if (!api) return '';
+  // 解析 ?api= 参数（允许 http/https）
+  const getApiBase = () => {
     try {
-      const x = new URL(api);
-      // 去掉最后的斜杠，避免双斜杠
-      return x.origin + (x.pathname.replace(/\/+$/,''));
-    } catch {
-      return '';
-    }
-  }
+      const u = new URL(location.href);
+      const api = u.searchParams.get("api");
+      if (!api) return "";
+      // 去掉末尾斜杠，保持 /v1 追加时不重复
+      return api.replace(/\/+$/,"");
+    } catch { return ""; }
+  };
   const API_BASE = getApiBase();
 
-  // ---------- state ----------
-  let rows = [];     // 渲染用的 2D 数组（行）
-  let source = null; // 网关原始返回
+  // 一些容器/控件选择（尽量兼容旧 DOM）
+  const els = {
+    urlInput: $('#url') || $('input[type="url"], input[name="url"]') || $('input'),
+    btnFetch: $('#btnFetch') || $$('.btn').find(b => /抓取/.test(b?.textContent||"")),
+    selectLimit: $('#pageSize') || $('select'),
+    btnExport: $('#btnExport') || $$('.btn').find(b => /导出|Export/i.test(b?.textContent||"")),
+    btnClear: $('#btnClear') || $$('.btn').find(b => /清空|Clear/i.test(b?.textContent||"")),
+    toast: $('#toast') || $('.alert') || $('.msg') || null,
+    tbody: $('table tbody') || $('tbody'),
+    thead: $('table thead') || $('thead'),
+    table: $('table'),
+  };
 
-  // ---------- render ----------
-  function clearData() {
-    rows = [];
-    source = null;
+  const setToast = (msg, ok=true) => {
+    if (!els.toast) return;
+    els.toast.textContent = msg;
+    els.toast.style.display = 'block';
+    els.toast.style.background = ok ? '#fff8e1' : '#ffecec';
+    els.toast.style.color = ok ? '#444' : '#b00020';
+  };
+
+  const clearTable = () => {
     if (els.tbody) els.tbody.innerHTML = '';
-    showToast('已清空', 'info');
-  }
+  };
 
-  function buildImg(url) {
-    if (!url) return '';
-    const proxied = `${API_BASE}/v1/api/image?url=${encodeURIComponent(url)}`;
-    return `<img src="${proxied}" alt="" style="max-width:96px;max-height:72px;object-fit:contain;border:1px solid #eee;border-radius:4px;padding:2px;background:#fff">`;
-  }
+  // 将检测到的 type -> 解析器 t 参数
+  const TYPE_TO_T = {
+    'Shopify': 'shopify',
+    'WooCommerce': 'woo1',
+    'Shopware': 'shopware',
+    'Magento': 'magento',
+    'OpenCart': 'opencart',
+    // 兜底：如果未知就不带 t，让后端走通用解析
+  };
 
-  function renderTable(products = []) {
-    if (!els.tbody) return;
-    const limit = Number(els.pageSize?.value || 50);
-    const preview = products.slice(0, limit);
+  // 结果缓存（导出用）
+  let lastRows = [];
 
-    const html = preview.map((p, i) => {
-      const idx = i + 1;
-      const sku = p.sku ?? '';
-      const title = p.title ?? p.name ?? '';
-      const qty = p.moq ?? p.qty ?? p.quantity ?? '';
-      const price = p.price ?? '';
-      const link = p.link ?? p.url ?? '';
-      // 取首图：img / images[0]
-      const imgUrl = p.img || (Array.isArray(p.imgs) && p.imgs[0]) || (Array.isArray(p.images) && p.images[0]) || '';
-      return `<tr>
-        <td>${idx}</td>
-        <td>${escapeHtml(sku)}</td>
-        <td>${imgUrl ? buildImg(imgUrl) : ''}</td>
-        <td style="max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(title)}</td>
-        <td>${escapeHtml(String(qty))}</td>
-        <td>${escapeHtml(String(price))}</td>
-        <td>${link ? `<a href="${link}" target="_blank" rel="noopener">链接</a>` : ''}</td>
-      </tr>`;
-    }).join('');
-    els.tbody.innerHTML = html;
+  // ---------------- 渲染行 ----------------
+  const renderRows = (rows) => {
+    lastRows = rows || [];
+    clearTable();
+    if (!rows?.length) return;
 
-    const total = products.length;
-    showToast(`抓取成功：共 ${total} 条（预览前 ${preview.length} 条）`, 'ok');
-  }
+    const frag = document.createDocumentFragment();
+    rows.forEach((r, idx) => {
+      const tr = document.createElement('tr');
 
-  function escapeHtml(s) {
-    return String(s ?? '')
-      .replaceAll('&','&amp;')
-      .replaceAll('<','&lt;')
-      .replaceAll('>','&gt;')
-      .replaceAll('"','&quot;')
-      .replaceAll("'",'&#39;');
-  }
+      const tdIdx = document.createElement('td');
+      tdIdx.textContent = String(idx+1);
 
-  // ---------- fetch ----------
-  async function fetchCatalog() {
-    const url = (els.url?.value || '').trim();
-    if (!url) return showToast('请输入目录链接', 'warn');
-    if (!API_BASE) return showToast('缺少 ?api= 网关地址', 'err');
+      const tdSku = document.createElement('td');
+      tdSku.textContent = r.sku || '—';
 
-    // 清空旧数据
-    if (els.tbody) els.tbody.innerHTML = '';
-    showToast('正在抓取…', 'info');
-
-    try {
-      const limit = Number(els.pageSize?.value || 50);
-      // 固定只走网关 parse，不做任何本地解析兜底
-      const res = await fetch(`${API_BASE}/v1/api/catalog/parse`, {
-        method: 'POST',
-        mode: 'cors',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          url,
-          limit,
-          // 以下参数保持与网关对齐，方便以后扩展
-          imgCount: 2,
-          compare: 1,
-          detailSkuMax: 18,
-          detailSkuDelim: ' '
-        })
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(()=> '');
-        throw new Error(`网关返回 ${res.status}：${text || res.statusText}`);
+      const tdImg = document.createElement('td');
+      if (r.img) {
+        const img = document.createElement('img');
+        // 统一使用网关图片代理，避免跨域
+        const imgUrl = `${API_BASE}/v1/api/image?url=${encodeURIComponent(r.img)}`;
+        img.src = imgUrl;
+        img.alt = r.title || '';
+        img.referrerPolicy = 'no-referrer';
+        img.loading = 'lazy';
+        img.style.maxWidth = '80px';
+        img.style.maxHeight = '80px';
+        tdImg.appendChild(img);
+      } else {
+        tdImg.textContent = '—';
       }
 
-      const data = await res.json();
-      source = data;
+      const tdTitle = document.createElement('td');
+      tdTitle.textContent = r.title || r.desc || '—';
 
-      if (!data || data.ok === false) {
-        const msg = data?.msg || data?.error || '网关返回失败';
-        throw new Error(msg);
+      const tdMoq = document.createElement('td');
+      tdMoq.textContent = r.moq || '—';
+
+      const tdPrice = document.createElement('td');
+      tdPrice.textContent = r.price ? (r.currency ? `${r.price} ${r.currency}` : r.price) : '—';
+
+      const tdLink = document.createElement('td');
+      if (r.link || r.url) {
+        const a = document.createElement('a');
+        a.href = r.link || r.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = '链接';
+        tdLink.appendChild(a);
+      } else {
+        tdLink.textContent = '—';
       }
 
-      const products = Array.isArray(data.products) ? data.products : [];
-      if (!products.length) {
-        // 没产品时给出更多上下文，方便排错
-        console.warn('parse empty payload:', data);
-        showToast('抓取完成，但未解析到产品。可能该页面是分类页/空页，或需登录/翻页。', 'warn');
-      }
-      renderTable(products);
-    } catch (err) {
-      console.error(err);
-      showToast(`抓取失败：${err.message || err}`, 'err');
-    }
-  }
-
-  // ---------- export ----------
-  async function exportExcel() {
-    if (!rows?.length && !source?.products?.length) {
-      return showToast('无可导出的数据', 'warn');
-    }
-    const products = source?.products || [];
-
-    // 先做 CSV（稳）
-    const headers = ['#','货号','图片','描述','起订量','单价','链接'];
-    const csvRows = [headers.join(',')];
-
-    const limit = Number(els.pageSize?.value || 50);
-    const preview = products.slice(0, limit);
-
-    preview.forEach((p, i) => {
-      const idx = i + 1;
-      const sku = sanitizeCsv(p.sku);
-      const title = sanitizeCsv(p.title ?? p.name ?? '');
-      const qty = sanitizeCsv(p.moq ?? p.qty ?? p.quantity ?? '');
-      const price = sanitizeCsv(p.price ?? '');
-      const link = sanitizeCsv(p.link ?? p.url ?? '');
-      const firstImg = p.img || (Array.isArray(p.imgs) && p.imgs[0]) || (Array.isArray(p.images) && p.images[0]) || '';
-      csvRows.push([idx, sku, firstImg, title, qty, price, link].join(','));
+      [tdIdx, tdSku, tdImg, tdTitle, tdMoq, tdPrice, tdLink].forEach(td => tr.appendChild(td));
+      frag.appendChild(tr);
     });
 
-    const blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `catalog_${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    els.tbody?.appendChild(frag);
+  };
 
-    // 如果页面已引入 ExcelJS，额外尝试生成 xlsx，并把图片替换为 dataURL（需要 /v1/api/image64）
-    if (window.ExcelJS) {
-      try {
-        await exportXlsxWithImages(preview);
-      } catch (e) {
-        console.warn('xlsx 导出失败（已回落 csv）：', e);
-      }
-    }
-  }
+  // ---------------- 导出 ----------------
+  const exportXlsx = async () => {
+    if (!lastRows?.length) return setToast('没有可以导出的数据', false);
 
-  function sanitizeCsv(s) {
-    const v = String(s ?? '');
-    if (/[,"\n]/.test(v)) return `"${v.replace(/"/g,'""')}"`;
-    return v;
-  }
-
-  async function exportXlsxWithImages(products) {
-    const ExcelJS = window.ExcelJS;
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Catalog');
-
-    const headers = ['#','货号','图片','描述','起订量','单价','链接'];
-    ws.addRow(headers);
-
-    for (let i = 0; i < products.length; i++) {
-      const p = products[i];
-      const idx = i + 1;
-      const row = ws.addRow([
-        idx,
-        p.sku ?? '',
-        '', // 图片占位
-        p.title ?? p.name ?? '',
-        p.moq ?? p.qty ?? p.quantity ?? '',
-        p.price ?? '',
-        p.link ?? p.url ?? ''
-      ]);
-
-      // 尝试获取 base64
-      const imgUrl = p.img || (Array.isArray(p.imgs) && p.imgs[0]) || (Array.isArray(p.images) && p.images[0]) || '';
-      if (imgUrl && API_BASE) {
-        try {
-          const r = await fetch(`${API_BASE}/v1/api/image64?url=${encodeURIComponent(imgUrl)}`, { mode: 'cors' });
-          const j = await r.json();
-          if (j?.ok && /^data:image\//.test(j.base64)) {
-            const imgId = wb.addImage({ base64: j.base64, extension: (j.base64.match(/^data:image\/(\w+)/)?.[1] || 'png') });
-            // 图片放到第 3 列
-            ws.addImage(imgId, { tl: { col: 2, row: row.number - 1 }, ext: { width: 96, height: 72 } });
-          }
-        } catch (e) {
-          console.warn('image64 失败：', e);
-        }
-      }
+    // 尝试使用 ExcelJS（如果页面已加载）
+    const hasExcel = !!window.ExcelJS;
+    if (!hasExcel) {
+      // 回退 CSV（只导出核心列，避免 base64）
+      const head = ['#','货号','标题','MOQ','单价','链接'];
+      const lines = [head.join(',')];
+      lastRows.forEach((r,i) => {
+        const row = [
+          String(i+1),
+          (r.sku||'').replace(/,/g,' '),
+          (r.title||r.desc||'').replace(/,/g,' '),
+          (r.moq||'').toString().replace(/,/g,' '),
+          (r.price||'').toString().replace(/,/g,' '),
+          (r.link||r.url||'')
+        ];
+        lines.push(row.join(','));
+      });
+      const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'catalog.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      return;
     }
 
-    const buf = await wb.xlsx.writeBuffer();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-    a.download = `catalog_${Date.now()}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
-  // ---------- bind ----------
-  els?.btnFetch?.addEventListener('click', fetchCatalog);
-  els?.btnExport?.addEventListener('click', exportExcel);
-  els?.btnClear?.addEventListener('click', clearData);
-  els?.url?.addEventListener?.('keydown', e => { if (e.key === 'Enter') fetchCatalog(); });
-
-  // 健康检查（不阻塞）
-  (async () => {
     try {
-      if (API_BASE) await fetch(`${API_BASE}/v1/api/health`, { mode: 'cors' });
-    } catch {}
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Sheet1');
+      ws.columns = [
+        { header:'#', key:'idx', width:5 },
+        { header:'货号', key:'sku', width:20 },
+        { header:'图片', key:'img', width:30 },
+        { header:'描述', key:'title', width:40 },
+        { header:'起订量', key:'moq', width:10 },
+        { header:'单价', key:'price', width:15 },
+        { header:'链接', key:'link', width:40 },
+      ];
+      lastRows.forEach((r,i) => {
+        ws.addRow({
+          idx: i+1,
+          sku: r.sku||'',
+          img: r.img||'',
+          title: r.title||r.desc||'',
+          moq: r.moq||'',
+          price: r.currency ? `${r.price||''} ${r.currency}` : (r.price||''),
+          link: r.link||r.url||'',
+        });
+      });
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'catalog.xlsx';
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) {
+      console.error(e);
+      setToast('导出失败：'+ e.message, false);
+    }
+  };
+
+  // ---------------- 抓取核心：detect -> parse（GET） ----------------
+  const detectType = async (url) => {
+    if (!API_BASE) return null;
+    try {
+      const r = await fetch(`${API_BASE}/v1/api/detect?url=${encodeURIComponent(url)}`, {
+        method: 'GET',
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-cache',
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      if (j?.ok && j?.type) return j.type;
+      return null;
+    } catch { return null; }
+  };
+
+  const parseCatalog = async (url, limit, hintT) => {
+    const search = new URLSearchParams();
+    search.set('url', url);
+    if (limit) search.set('limit', String(limit));
+    // 为图片与详情设置一些温和默认（后端会忽略未知参数，安全）
+    search.set('imgCount', '2');
+    search.set('compare', '1');
+    search.set('detailSkuMax', '8');
+    search.set('imgDelim', ' ');
+    if (hintT) search.set('t', hintT);
+
+    const api = `${API_BASE}/v1/api/catalog/parse?${search.toString()}`;
+    const r = await fetch(api, {
+      method: 'GET',               // 关键：用 GET，避免 preflight
+      mode: 'cors',
+      credentials: 'omit',
+      cache: 'no-cache',
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  };
+
+  const fetchCatalog = async () => {
+    const url = (els.urlInput?.value || '').trim();
+    const limit = Number(els.selectLimit?.value || 50) || 50;
+    if (!url) return setToast('请输入目录页链接', false);
+    if (!API_BASE) return setToast('未指定网关 ?api=，无法抓取', false);
+
+    setToast('正在检测页面类型…');
+    clearTable();
+
+    let type = await detectType(url);
+    // 将检测到的 type 映射为 t；未知则不带 t，让后端自己兜底
+    const t = TYPE_TO_T[type] || '';
+
+    try {
+      setToast(`正在抓取（${type || '通用模式'}）…`);
+      const data = await parseCatalog(url, limit, t);
+      if (!data?.ok) {
+        setToast(`抓取失败：${data?.error || 'unknown'}`, false);
+        return;
+      }
+
+      const list = Array.isArray(data.products) ? data.products : [];
+      // 如果后端返回的是“通用 a 标签列表”（常见为空 sku、无价），提醒用户可能未识别
+      const looksLikeGeneric =
+        list.length && list.every(x => !x.price && !x.sku && !x.moq);
+
+      if (!list.length || looksLikeGeneric) {
+        setToast('已抓取但未识别为电商目录（或解析模板不匹配），返回了页面链接列表。建议更换目录链接或稍后再试。', false);
+      } else {
+        setToast(`抓取成功：共 ${list.length} 条（预览前 ${Math.min(list.length, limit)} 条）`);
+      }
+
+      // 渲染（不管是不是通用列表，仍然展示）
+      renderRows(list.slice(0, limit));
+    } catch (e) {
+      console.error(e);
+      setToast('抓取失败：' + e.message, false);
+    }
+  };
+
+  // ---------------- 绑定事件 ----------------
+  els.btnFetch?.addEventListener('click', fetchCatalog);
+  els.btnExport?.addEventListener('click', exportXlsx);
+  els.btnClear?.addEventListener('click', () => { clearTable(); lastRows = []; setToast('已清空'); });
+  els.urlInput?.addEventListener?.('keydown', e => { if (e.key === 'Enter') fetchCatalog(); });
+
+  // 启动时轻量健康检查（不阻塞 UI）
+  (async () => {
+    if (!API_BASE) return;
+    try { await fetch(`${API_BASE}/v1/api/health`, { mode: 'cors', credentials:'omit' }); }
+    catch {}
   })();
+
 })();
