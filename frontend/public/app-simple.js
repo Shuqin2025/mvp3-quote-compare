@@ -1,5 +1,6 @@
 // app-simple.js — 单页 UI + i18n + Excel(内嵌图片)
-// 规则：统一 /api 路由；自动探测 /v1；图片统一走 /api/image64
+// 统一拼接规则：  实际请求 = API_BASE + API_PREFIX(可能为''或'/v1') + (USE_API ? '/api' : '') + endpoint
+// 端点举例：健康 /health；业务 /catalog/parse、/image64
 // last-mod: 2025-10-12
 
 (() => {
@@ -8,7 +9,7 @@
   const $ = (s, r = document) => r.querySelector(s);
   const isHttp = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
 
-  // ───────────────── API BASE 选择 ─────────────────
+  // ───────────────── 读取 API_BASE ─────────────────
   const apiParam = new URLSearchParams(location.search).get('api');
   const fromBoot =
     (typeof window !== 'undefined') &&
@@ -32,48 +33,44 @@
 
   window.__API_BASE_EFFECTIVE__ = API_BASE;
 
-  // ───────────────── 可选鉴权头 ─────────────────
+  // ───────────────── 可选鉴权头（仅当URL显式传入 ?auth= 才生效，避免无意预检） ─────────────────
   const authParam = new URLSearchParams(location.search).get('auth');
-  const fromBootAuth = (typeof window !== 'undefined') && (window.__API_AUTH__ || window.API_AUTH);
-  let fromEnvAuth;
-  try {
-    const hasImportMeta = (typeof import.meta !== 'undefined');
-    fromEnvAuth = (hasImportMeta && import.meta?.env?.VITE_API_AUTH) ? import.meta.env.VITE_API_AUTH : undefined;
-  } catch { fromEnvAuth = undefined; }
-  const fromMetaAuth  = document.querySelector('meta[name="api-auth"]')?.content;
-  const fromLocalAuth = localStorage.getItem('mvp3_auth') || '';
-
-  const AUTH =
-    (authParam && String(authParam)) ||
-    (fromBootAuth && String(fromBootAuth)) ||
-    (fromEnvAuth && String(fromEnvAuth)) ||
-    (fromMetaAuth && String(fromMetaAuth)) ||
-    (fromLocalAuth && String(fromLocalAuth)) || '';
-
+  const AUTH = authParam ? String(authParam) : '';
   const AUTH_HEADERS = AUTH ? { Authorization: AUTH } : {};
   window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
 
-  // ───────────────── 自动探测 /v1 前缀（兼容 /v1/api/health） ─────────────────
-  let API_PREFIX = '';
+  // ───────────────── 自动探测（是否需要 /v1、是否需要 /api） ─────────────────
+  // 目标：确认两件事：
+  //   1) API_PREFIX 是 '' 还是 '/v1'
+  //   2) USE_API 是否需要在路径中插入 '/api'
+  let API_PREFIX = '/v1';     // 针对网关默认先假设 '/v1'
+  let USE_API = true;         // 网关默认在 '/v1' 后还要 '/api'
   window.__API_PREFIX__ = API_PREFIX;
+  window.__USE_API__ = USE_API;
 
   async function detectPrefix() {
-    const tryPaths = [
-      '/v1/api/health',
-      '/v1/health',
-      '/health',
+    const tries = [
+      { pfx: '/v1', useApi: true,  url: `${API_BASE}/v1/api/health` },
+      { pfx: '/v1', useApi: false, url: `${API_BASE}/v1/health` },
+      { pfx: '',    useApi: false, url: `${API_BASE}/health` },
     ];
-    for (const p of tryPaths) {
+    for (const t of tries) {
       try {
-        const r = await fetch(`${API_BASE}${p}`, { mode: 'cors', headers: AUTH_HEADERS });
+        const r = await fetch(t.url, { mode: 'cors' });
         if (r.ok) {
-          API_PREFIX = p.startsWith('/v1') ? '/v1' : '';
+          API_PREFIX = t.pfx;
+          USE_API = t.useApi;
           window.__API_PREFIX__ = API_PREFIX;
+          window.__USE_API__ = USE_API;
           return;
         }
       } catch { /* ignore */ }
     }
   }
+
+  // 辅助：拼接真实接口地址（传入 endpoint 必须以斜杠开头，如 '/catalog/parse'、'/image64'）
+  const buildApi = (endpoint) =>
+    `${API_BASE}${API_PREFIX}${USE_API ? '/api' : ''}${endpoint}`;
 
   // ───────────────── i18n ─────────────────
   const i18n = {
@@ -161,7 +158,7 @@
     return sku || '';
   };
   const firstImg = (x) => {
-    if (x?.img_b64) return x.img_b64;                 // 优先 dataURL
+    if (x?.img_b64) return x.img_b64;
     if (x?.img) return x.img;
     if (Array.isArray(x?.imgs) && x.imgs.length) return x.imgs[0];
     return '';
@@ -184,26 +181,7 @@
     `).join('');
   }
 
-  // ───────────────── 底层 fetch（404 时换 /v1 前缀） ─────────────────
-  async function fetchJsonWithPrefix(pathWithApi, opts={}) {
-    let url = `${API_BASE}${API_PREFIX}${pathWithApi}`;
-    let r;
-    try { r = await fetch(url, opts); }
-    catch (e) { throw e; }
-
-    if (r.status === 404) {
-      const alt = (API_PREFIX === '/v1') ? '' : '/v1';
-      const url2 = `${API_BASE}${alt}${pathWithApi}`;
-      try {
-        const r2 = await fetch(url2, opts);
-        if (r2.ok) { API_PREFIX = alt; window.__API_PREFIX__ = API_PREFIX; return r2; }
-        return r2;
-      } catch (e) { throw e; }
-    }
-    return r;
-  }
-
-  // ───────────────── 抓取目录（POST /api/catalog/parse） ─────────────────
+  // ───────────────── 统一 GET 抓取目录（避免预检，匹配网关实现） ─────────────────
   async function doFetch() {
     const t = i18n[lang];
     const btn = $('#btnFetch');
@@ -214,18 +192,11 @@
       if (!url) return;
       const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
-      // UI: Loading
       if (btn) { btn.disabled = true; btn.textContent = t.fetch + '…'; }
       if (status) status.textContent = t.loading;
 
-     const ep = `/catalog/parse`;
-      const payload = { url, limit }; // 简洁参数
-      const r = await fetchJsonWithPrefix(ep, {
-        method: 'POST',
-        mode: 'cors',
-        headers: { 'Content-Type': 'application/json', ...AUTH_HEADERS },
-        body: JSON.stringify(payload),
-      });
+      const ep = buildApi('/catalog/parse') + `?url=${encodeURIComponent(url)}&limit=${limit}`;
+      const r = await fetch(ep, { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
 
@@ -251,7 +222,7 @@
     }
   }
 
-  // ───────────────── 导出 Excel（按需 /api/image64） ─────────────────
+  // ───────────────── 导出 Excel（按需 /image64，后端返回“纯base64文字”） ─────────────────
   async function doExport() {
     const t = i18n[lang];
     if (!rows.length) { alert(t.pleaseFetch); return; }
@@ -281,10 +252,9 @@
         link: r.url ? { text: i18n[lang].linkText, hyperlink: r.url } : '',
       });
       rr.height = 78;
-      metas.push({ row: rr.number, img: r.img }); // 可能是 dataURL 或 http(s) 链接
+      metas.push({ row: rr.number, img: r.img });
     }
 
-    // 解析 dataURL
     const parseDataUrl = (dataURL) => {
       const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
       if (!m) return null;
@@ -296,16 +266,20 @@
       else if (ct.includes('bmp')) ext = 'bmp';
       return { raw: m[2], ext };
     };
-
-    // 通过后端把 http(s) 图片转 base64（统一 /api/image64）
+    const guessExtFromUrl = (u='') => {
+      const low = u.toLowerCase();
+      if (/\.(png)(\?|#|$)/.test(low)) return 'png';
+      if (/\.(webp)(\?|#|$)/.test(low)) return 'webp';
+      if (/\.(gif)(\?|#|$)/.test(low)) return 'gif';
+      if (/\.(bmp)(\?|#|$)/.test(low)) return 'bmp';
+      return 'jpeg';
+    };
     async function fetchB64ViaServer(imgUrl) {
-      const ep = `/api/image64?url=${encodeURIComponent(imgUrl)}`;
-      const r = await fetchJsonWithPrefix(ep, { method: 'GET', mode: 'cors', headers: AUTH_HEADERS });
+      const r = await fetch(buildApi('/image64') + `?url=${encodeURIComponent(imgUrl)}`, { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } });
       if (!r.ok) throw new Error(`image64 HTTP ${r.status}`);
-      const j = await r.json(); // { base64: 'data:image/...;base64,xxxxx' }
-      const parsed = parseDataUrl(j.base64);
-      if (!parsed) throw new Error('bad base64');
-      return parsed; // { raw, ext }
+      const raw = await r.text();       // 后端返回纯 base64
+      const ext = guessExtFromUrl(imgUrl);
+      return { raw, ext };
     }
 
     for (const m of metas) {
@@ -318,7 +292,6 @@
           ext = p.ext; raw = p.raw;
         }
         if (!raw) continue;
-
         const id = wb.addImage({ base64: raw, extension: ext || 'jpeg' });
         const r0 = m.row - 1;
         ws.addImage(id, { tl: { col: 1, row: r0 }, ext: { width: 120, height: 70 }, editAs: 'oneCell' });
@@ -347,9 +320,14 @@
   $('#btnClear')?.addEventListener('click', () => { rows = []; renderTable(); $('#status') && ($('#status').textContent = i18n[lang].uiNoData); });
   $('#url')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doFetch(); });
 
-  // 先探测一次前缀（不阻塞 UI）
+  // 先探测一次（不阻塞）
   detectPrefix().catch(()=>{});
 
-  // 轻量健康检查（不阻塞）
-  (async () => { try { await fetch(`${API_BASE}${API_PREFIX || ''}/health`, { mode: 'cors' }); } catch {} })();
+  // 轻量健康探测（不阻塞）
+  (async () => {
+    try {
+      const r = await fetch(buildApi('/health'), { mode: 'cors' });
+      if (!r.ok) throw 0;
+    } catch {}
+  })();
 })();
