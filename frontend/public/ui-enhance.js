@@ -278,3 +278,59 @@
   })();
 
 })();
+// === 诊断与兜底绑定（追加到 ui-enhance.js 末尾）=========================
+(() => {
+  const VER = 'diag-2025-10-12-3';
+  const q = s => document.querySelector(s);
+  const btn = q('#btnFetch') || q('button[data-role="fetch"]') || q('button.fetch-btn');
+  const input = q('#txtUrl') || q('input[name="url"], input[type="url"]');
+
+  console.info('[UI] enhance loaded:', VER, { btn: !!btn, input: !!input });
+
+  // 1) 防止按钮是 <button type="submit"> 被表单默认提交打断
+  if (btn && (btn.getAttribute('type') || '').toLowerCase() !== 'button') {
+    btn.setAttribute('type', 'button');
+  }
+
+  // 2) 兜底绑定点击事件（不影响你原来的绑定；若原来已绑定，这个只是额外打印日志）
+  if (btn) {
+    btn.addEventListener('click', async (e) => {
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[UI] 点击抓取按钮');
+
+        const url = (input && input.value || '').trim();
+        if (!url) {
+          console.warn('[UI] 没有检测到输入 URL');
+          return;
+        }
+        // 打个探针：看看 API 根（从地址栏 ?api= 里拿）
+        const api = new URLSearchParams(location.search).get('api')?.replace(/\/+$/,'');
+        console.log('[UI] 将使用 API =', api);
+
+        // 只做一次轻量探测，不影响你原有 fetch 流程
+        if (api) {
+          const health = `${api}/v1/api/health`;
+          console.log('[UI] 试探健康检查 →', health);
+          fetch(health, { mode: 'cors' })
+            .then(r => r.text())
+            .then(t => console.log('[UI] health =', t))
+            .catch(err => console.warn('[UI] health 失败:', err));
+        } else {
+          console.warn('[UI] 没在地址栏 ?api= 里找到网关，当前页面将不会走网关');
+        }
+      } catch (err) {
+        console.error('[UI] 兜底点击处理异常：', err);
+      }
+    }, { capture: true });
+  } else {
+    console.warn('[UI] 没找到“抓取目录”按钮，请确认按钮选择器(id/class)是否变更');
+  }
+
+  // 3) 再加一层“迟到绑定”，避免脚本早于 DOM 渲染完成
+  setTimeout(() => {
+    const dbg = q('#btnFetch') || q('button[data-role="fetch"]') || q('button.fetch-btn');
+    console.info('[UI] 迟到检查，按钮是否就绪:', !!dbg);
+  }, 800);
+})();
