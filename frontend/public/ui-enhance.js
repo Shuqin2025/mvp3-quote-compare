@@ -30,16 +30,17 @@
     selectLimit: $('#pageSize') || $('select'),
     btnExport: $('#btnExport') || $$('.btn').find(b => /导出|Export/i.test(b?.textContent||"")),
     btnClear: $('#btnClear') || $$('.btn').find(b => /清空|Clear/i.test(b?.textContent||"")),
-    toast: $('#toast') || $('.alert') || $('.msg') || null,
-    tbody: $('table tbody') || $('tbody'),
-    thead: $('table thead') || $('thead'),
-    table: $('table'),
+    toast: $('#status') || $('#okbar') || $('.alert') || $('.msg') || null,
+    tbody: $('#tbl tbody') || $('table tbody') || $('tbody'),
+    thead: $('#tbl thead') || $('table thead') || $('thead'),
+    table: $('#tbl') || $('table'),
   };
 
   const setToast = (msg, ok=true) => {
     if (!els.toast) return;
     els.toast.textContent = msg;
     els.toast.style.display = 'block';
+    els.toast.classList?.remove('ok','info');
     els.toast.style.background = ok ? '#fff8e1' : '#ffecec';
     els.toast.style.color = ok ? '#444' : '#b00020';
   };
@@ -82,8 +83,8 @@
         const img = document.createElement('img');
         // 统一使用网关图片代理，避免跨域
         const imgUrl = API_BASE
-  ? `${API_BASE}/v1/api/image?url=${encodeURIComponent(r.img)}`
-  : r.img;
+          ? `${API_BASE}/v1/api/image?url=${encodeURIComponent(r.img)}`
+          : r.img;
         img.src = imgUrl;
         img.alt = r.title || '';
         img.referrerPolicy = 'no-referrer';
@@ -102,7 +103,9 @@
       tdMoq.textContent = r.moq || '—';
 
       const tdPrice = document.createElement('td');
-      tdPrice.textContent = r.price ? (r.currency ? `${r.price} ${r.currency}` : r.price) : '—';
+      tdPrice.textContent = r.price
+        ? (r.currency ? `${r.price} ${r.currency}` : r.price)
+        : '—';
 
       const tdLink = document.createElement('td');
       if (r.link || r.url) {
@@ -226,6 +229,21 @@
     return r.json();
   };
 
+  const normalizeRows = (data) => {
+    const arr = Array.isArray(data?.products) ? data.products : [];
+    return arr.map(p => ({
+      sku: p.sku || p.code || '',
+      title: p.title || p.name || p.desc || '',
+      img: p.img || (Array.isArray(p.imgs) ? p.imgs[0] : ''),
+      moq: p.moq || '',
+      price: p.price || '',
+      currency: p.currency || '',
+      link: p.link || p.url || '',
+      url: p.url || p.link || '',
+      desc: p.desc || ''
+    }));
+  };
+
   const fetchCatalog = async () => {
     const url = (els.urlInput?.value || '').trim();
     const limit = Number(els.selectLimit?.value || 50) || 50;
@@ -234,24 +252,35 @@
 
     setToast('正在检测页面类型…');
     clearTable();
-// 新增：抓取期间禁用按钮
-  els.btnFetch && (els.btnFetch.disabled = true);
+    // 抓取期间禁用按钮
+    els.btnFetch && (els.btnFetch.disabled = true);
 
-  let type = await detectType(url);
-  const t = TYPE_TO_T[type] || '';
+    let type = await detectType(url);
+    const t = TYPE_TO_T[type] || '';
 
-  try {
-    setToast(`正在抓取（${type || '通用模式'}）…`);
-    const data = await parseCatalog(url, limit, t);
-    ...
-  } catch (e) {
-    console.error(e);
-    setToast('抓取失败：' + e.message, false);
-  } finally {
-    // 新增：恢复按钮
-    els.btnFetch && (els.btnFetch.disabled = false);
-  }
-};
+    try {
+      setToast(`正在抓取（${type || '通用模式'}）…`);
+      const data = await parseCatalog(url, limit, t);
+
+      if (!data?.ok) {
+        setToast(`抓取失败：${data?.error || 'Unknown Error'}`, false);
+        return;
+      }
+
+      const rows = normalizeRows(data);
+      renderRows(rows);
+
+      const cnt = rows.length;
+      const adapter = data.adapter || (type || 'generic');
+      setToast(`抓取成功：共 ${cnt} 条（来源：${adapter}）`, true);
+    } catch (e) {
+      console.error(e);
+      setToast('抓取失败：' + e.message, false);
+    } finally {
+      // 恢复按钮
+      els.btnFetch && (els.btnFetch.disabled = false);
+    }
+  };
 
   // ---------------- 绑定事件 ----------------
   els.btnFetch?.addEventListener('click', fetchCatalog);
@@ -267,9 +296,10 @@
   })();
 
 })();
+
 // === 诊断与兜底绑定（追加到 ui-enhance.js 末尾）=========================
 (() => {
-  const VER = 'diag-2025-10-12-3';
+  const VER = 'diag-2025-10-12-4';
   const q = s => document.querySelector(s);
   const btn = q('#btnFetch') || q('button[data-role="fetch"]') || q('button.fetch-btn');
   const input = q('#txtUrl') || q('input[name="url"], input[type="url"]');
@@ -298,7 +328,7 @@
         const api = new URLSearchParams(location.search).get('api')?.replace(/\/+$/,'');
         console.log('[UI] 将使用 API =', api);
 
-        // 只做一次轻量探测，不影响你原有 fetch 流程
+        // 轻量探测，不影响主流程
         if (api) {
           const health = `${api}/v1/api/health`;
           console.log('[UI] 试探健康检查 →', health);
