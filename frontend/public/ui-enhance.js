@@ -52,7 +52,7 @@
   // 将检测到的 type -> 解析器 t 参数
   const TYPE_TO_T = {
     'Shopify': 'shopify',
-    'WooCommerce': 'woo1',
+    'WooCommerce': 'woocommerce',   // ← 修正映射
     'Shopware': 'shopware',
     'Magento': 'magento',
     'OpenCart': 'opencart',
@@ -230,73 +230,145 @@
   };
 
   const normalizeRows = (data) => {
-const arr = Array.isArray(data?.products) ? data.products : [];
-const base = (els?.urlInput?.value || '').trim();   // 当前目录页的 URL
-const toAbs = (u) => {
-if (!u) return '';
-try { return new URL(u, base).href; } catch { return u; }
-};
-return arr.map(p => {
-const link = toAbs(p.link || p.url || '');
-const imgRaw = p.img || (Array.isArray(p.imgs) ? p.imgs[0] : '');
-const img = toAbs(imgRaw);
-return {
-sku: p.sku || p.code || '',
-title: p.title || p.name || p.desc || '',
-img,
-moq: p.moq || '',
-price: p.price || '',
-currency: p.currency || '',
-link,
-url: link,
-desc: p.desc || ''
-};
-});
-};
-
-  const fetchCatalog = async () => {
-    const url = (els.urlInput?.value || '').trim();
-    const limit = Number(els.selectLimit?.value || 50) || 50;
-    if (!url) return setToast('请输入目录页链接', false);
-    if (!API_BASE) return setToast('未指定网关 ?api=，无法抓取', false);
-
-    setToast('正在检测页面类型…');
-    clearTable();
-    // 抓取期间禁用按钮
-    els.btnFetch && (els.btnFetch.disabled = true);
-
-    let type = await detectType(url);
-    const t = TYPE_TO_T[type] || '';
-
-    try {
-      setToast(`正在抓取（${type || '通用模式'}）…`);
-      const data = await parseCatalog(url, limit, t);
-
-      if (!data?.ok) {
-        setToast(`抓取失败：${data?.error || 'Unknown Error'}`, false);
-        return;
-      }
-
-      const rows = normalizeRows(data);
-      renderRows(rows);
-
-      const cnt = rows.length;
-      const adapter = data.adapter || (type || 'generic');
-      setToast(`抓取成功：共 ${cnt} 条（来源：${adapter}）`, true);
-    } catch (e) {
-      console.error(e);
-      setToast('抓取失败：' + e.message, false);
-    } finally {
-      // 恢复按钮
-      els.btnFetch && (els.btnFetch.disabled = false);
-    }
+    const arr = Array.isArray(data?.products) ? data.products : [];
+    const base = (els?.urlInput?.value || '').trim();   // 当前目录页的 URL
+    const toAbs = (u) => {
+      if (!u) return '';
+      try { return new URL(u, base).href; } catch { return u; }
+    };
+    return arr.map(p => {
+      const link = toAbs(p.link || p.url || '');
+      const imgRaw = p.img || (Array.isArray(p.imgs) ? p.imgs[0] : '');
+      const img = toAbs(imgRaw);
+      return {
+        sku: p.sku || p.code || '',
+        title: p.title || p.name || p.desc || '',
+        img,
+        moq: p.moq || '',
+        price: p.price || '',
+        currency: p.currency || '',
+        link,
+        url: link,
+        desc: p.desc || ''
+      };
+    });
   };
 
+  // === 适配器猜测：根据 URL 直接给后端一个更靠谱的 t（Unknown 时兜底） ===
+  function guessAdapterFromUrl(url) {
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      const path = u.pathname.toLowerCase();
+      const qs   = u.search.toLowerCase();
+
+      // 0) 站点专用（最稳）
+      if (/(^|\.)memoryking\.de$/.test(host)) return 'memoryking';
+
+      // 1) Shopify
+      if (
+        host.endsWith('myshopify.com') ||
+        /(^|\.)kith\.com$/.test(host) ||
+        path.includes('/collections/') ||
+        path.includes('/products/')
+      ) {
+        return 'shopify';
+      }
+
+      // 2) WooCommerce
+      if (
+        path.includes('/product-category/') ||
+        path === '/shop/' || path.startsWith('/shop/') ||
+        path.includes('/product-tag/')
+      ) {
+        return 'woocommerce';
+      }
+
+      // 3) Shopware（德语站常见；使用其典型 query/路径特征）
+      if (
+        /[?&](scategory|spage|sviewport)=/.test(qs) ||
+        path.includes('/listing/') ||
+        path.includes('/kategorie/') || path.includes('/kategorien/')
+      ) {
+        return 'shopware';
+      }
+
+      // 4) Magento（简单猜测：/catalog/、/mage/等）
+      if (path.includes('/catalog/') || path.includes('/mage/')) {
+        return 'magento';
+      }
+
+      // 不确定就交给后端 detect
+      return '';
+    } catch {
+      return '';
+    }
+  }
+
+  async function handleFetchClick() {
+    const btn = els.btnFetch;
+    const input = document.querySelector('#txtUrl');
+    const limitSel = document.querySelector('#selLimit');
+
+    if (!input) {
+      setToast('未找到输入框元素 #txtUrl', false);
+      return;
+    }
+
+    const url = (input.value || '').trim();
+    if (!url) {
+      setToast('请输入要抓取的目录链接', false);
+      return;
+    }
+
+    // UI 状态
+    clearTable();
+    btn && (btn.disabled = true);
+    setToast('正在检测网站类型…');
+
+    // 先让后端 detect 一下（用于展示与兜底）
+    let type = 'Unknown';
+    try { type = await detectType(url); } catch {}
+
+    // 根据 URL 再猜一遍，提升命中率（后端 Unknown 时尤其有用）
+    const guessT = guessAdapterFromUrl(url);
+    // 注意：TYPE_TO_T 里键是后端 detect 的类型（Shopware/WooCommerce/...），值是你要传给后端的 t
+    // 例如：{ Shopware: 'shopware', WooCommerce: 'woocommerce', Shopify: 'shopify', Magento: 'magento' }
+    const t = guessT || (TYPE_TO_T[type] || ''); // 优先采用 URL 猜测
+
+    // 记录使用的适配器
+    const useAdapterText = t ? `（adapter: ${t}）` : '（adapter: auto）';
+    setToast(`开始抓取数据（${type}）${useAdapterText} …`);
+
+    // 读取条数
+    const limit = parseInt((limitSel && limitSel.value) || '50', 10) || 50;
+
+    try {
+      const data = await parseCatalog(url, limit, t); // 把 t 传给后端
+      if (!data || data.ok === false) {
+        setToast(`抓取失败：${data?.error || 'unknown'}`, false);
+        return;
+      }
+      // 显示来源（方便排查是否又落到了 generic）
+      if (data.adapter) {
+        setToast(`抓取成功：共 ${data.count || (data.products?.length || 0)} 条（来源：${data.adapter}）`);
+      } else {
+        setToast(`抓取成功：共 ${data.count || (data.products?.length || 0)} 条`);
+      }
+      renderRows(normalizeRows(data));
+    } catch (e) {
+      console.error(e);
+      setToast('抓取失败：' + (e.message || e), false);
+    } finally {
+      btn && (btn.disabled = false);
+    }
+  }
+
   // ---------------- 绑定事件 ----------------
-  els.btnFetch?.addEventListener('click', fetchCatalog);
+  els.btnFetch?.addEventListener('click', handleFetchClick); // ← 改为新的处理函数
   els.btnExport?.addEventListener('click', exportXlsx);
   els.btnClear?.addEventListener('click', () => { clearTable(); lastRows = []; setToast('已清空'); });
-  els.urlInput?.addEventListener?.('keydown', e => { if (e.key === 'Enter') fetchCatalog(); });
+  els.urlInput?.addEventListener?.('keydown', e => { if (e.key === 'Enter') handleFetchClick(); });
 
   // 启动时轻量健康检查（不阻塞 UI）
   (async () => {
