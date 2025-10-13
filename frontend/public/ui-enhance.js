@@ -230,19 +230,29 @@
   };
 
   const normalizeRows = (data) => {
-    const arr = Array.isArray(data?.products) ? data.products : [];
-    return arr.map(p => ({
-      sku: p.sku || p.code || '',
-      title: p.title || p.name || p.desc || '',
-      img: p.img || (Array.isArray(p.imgs) ? p.imgs[0] : ''),
-      moq: p.moq || '',
-      price: p.price || '',
-      currency: p.currency || '',
-      link: p.link || p.url || '',
-      url: p.url || p.link || '',
-      desc: p.desc || ''
-    }));
-  };
+const arr = Array.isArray(data?.products) ? data.products : [];
+const base = (els?.urlInput?.value || '').trim();   // 当前目录页的 URL
+const toAbs = (u) => {
+if (!u) return '';
+try { return new URL(u, base).href; } catch { return u; }
+};
+return arr.map(p => {
+const link = toAbs(p.link || p.url || '');
+const imgRaw = p.img || (Array.isArray(p.imgs) ? p.imgs[0] : '');
+const img = toAbs(imgRaw);
+return {
+sku: p.sku || p.code || '',
+title: p.title || p.name || p.desc || '',
+img,
+moq: p.moq || '',
+price: p.price || '',
+currency: p.currency || '',
+link,
+url: link,
+desc: p.desc || ''
+};
+});
+};
 
   const fetchCatalog = async () => {
     const url = (els.urlInput?.value || '').trim();
