@@ -315,6 +315,8 @@
   if (btn) {
     btn.addEventListener('click', async (e) => {
       try {
+        e.preventDefault();
+        e.stopPropagation();
         console.log('[UI] 点击抓取按钮');
 
         const url = (input && input.value || '').trim();
@@ -339,6 +341,8 @@
         }
       } catch (err) {
         console.error('[UI] 兜底点击处理异常：', err);
+      }
+    }, { capture: true });
   } else {
     console.warn('[UI] 没找到“抓取目录”按钮，请确认按钮选择器(id/class)是否变更');
   }
