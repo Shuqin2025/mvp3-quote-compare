@@ -2,6 +2,26 @@
 import React, { useMemo, useState } from 'react';
 import axios from 'axios';
 
+// —— 统一顶部右侧气泡提示 ——
+function toastInfo(msg, ms = 2400) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.toast === 'function') { window.toast(msg); return; }
+    let bar = document.getElementById('__toast__');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = '__toast__';
+      bar.style.cssText = 'position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;';
+      document.body.appendChild(bar);
+    }
+    const item = document.createElement('div');
+    item.textContent = msg;
+    item.style.cssText = 'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.15);font-size:14px;max-width:360px;';
+    bar.appendChild(item);
+    setTimeout(() => { item.style.opacity = '0'; item.style.transition = 'opacity .3s'; }, ms);
+    setTimeout(() => item.remove(), ms + 320);
+  } catch { alert(msg); }
+}
+
 // 从 URL ?api=<backend> 读取 API 基址（无参时提示配置）
 function readApiBase() {
   const u = new URL(window.location.href);
@@ -75,7 +95,7 @@ export default function App() {
       const items = resp?.data?.items;
       const adapter = resp?.data?.adapter || resp?.data?.type;
       if ((adapter === 'generic-links' || adapter === 'GenericLinks') && (!Array.isArray(items) || items.length === 0)) {
-        alert(t.notCatalog);
+        toastInfo(t.notCatalog);
         setList([]);
         return;
       }
@@ -83,7 +103,7 @@ export default function App() {
       setList(items);
     } catch (e) {
       console.error('[mvp3] fetch error:', e);
-      alert(t.failed);
+      toastInfo(t.failed);
       setList([]);
     } finally {
       setLoading(false);
