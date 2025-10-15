@@ -147,20 +147,28 @@
     const l = e.target?.dataset?.lang;
     if (!l) return;
     lang = l; localStorage.setItem('mvp3_lang', l); applyLang();
-
-  // —— 轻量 toast ——
-  function toastInfo(msg) {
-    const ok = document.getElementById('okbar');
-    if (ok) { ok.textContent = msg; ok.style.display = 'block'; setTimeout(() => ok.style.display = 'none', 2500); return; }
-    alert(msg);
-  }
   });
   applyLang();
 
-  // —— 轻量 toast ——
-  function toastInfo(msg) {
-    const ok = document.getElementById('okbar');
-    if (ok) { ok.textContent = msg; ok.style.display = 'block'; setTimeout(() => ok.style.display = 'none', 2500); return; }
+  // —— 统一顶部右侧气泡提示 ——
+  function toastInfo(msg, ms = 2400) {
+    try {
+      if (typeof window.toast === 'function') { window.toast(msg); return; }
+      let bar = document.getElementById('__toast__');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = '__toast__';
+        bar.style.cssText = 'position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;';
+        document.body.appendChild(bar);
+      }
+      const item = document.createElement('div');
+      item.textContent = msg;
+      item.style.cssText = 'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.15);font-size:14px;max-width:360px;';
+      bar.appendChild(item);
+      setTimeout(() => { item.style.opacity = '0'; item.style.transition = 'opacity .3s'; }, ms);
+      setTimeout(() => item.remove(), ms + 320);
+    } catch { alert(msg); }
+  }
     alert(msg);
   }
 
