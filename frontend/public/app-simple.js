@@ -90,6 +90,7 @@
       failFetch:e=>`抓取失败：${e}`,
       failExport:e=>`导出失败：${e}`,
       loading:'抓取中…（如需从详情覆写 SKU，可能需要十几秒）',
+      hintNotCatalog:'该页面不是商品目录，请打开具体分类页再试',
     },
     de: {
       title:'Yunivera · Intelligenter Tabellen-Generator',
@@ -107,6 +108,7 @@
       failFetch:e=>`Abruf fehlgeschlagen: ${e}`,
       failExport:e=>`Export fehlgeschlagen: ${e}`,
       loading:'Abruf läuft… (falls SKU aus Detailseite überschrieben wird, kann es einige Sekunden dauern)',
+      hintNotCatalog:'Diese Seite ist kein Produktkatalog. Bitte öffnen Sie eine konkrete Kategorieseite und versuchen Sie es erneut.',
     },
     en: {
       title:'Yunivera · Smart Sheet Builder',
@@ -124,6 +126,7 @@
       failFetch:e=>`Fetch failed: ${e}`,
       failExport:e=>`Export failed: ${e}`,
       loading:'Fetching… (if overwriting SKU from details, it may take a few seconds)',
+      hintNotCatalog:"This page isn’t a product catalog. Please open a specific category page and try again.",
     },
   };
 
@@ -144,8 +147,22 @@
     const l = e.target?.dataset?.lang;
     if (!l) return;
     lang = l; localStorage.setItem('mvp3_lang', l); applyLang();
+
+  // —— 轻量 toast ——
+  function toastInfo(msg) {
+    const ok = document.getElementById('okbar');
+    if (ok) { ok.textContent = msg; ok.style.display = 'block'; setTimeout(() => ok.style.display = 'none', 2500); return; }
+    alert(msg);
+  }
   });
   applyLang();
+
+  // —— 轻量 toast ——
+  function toastInfo(msg) {
+    const ok = document.getElementById('okbar');
+    if (ok) { ok.textContent = msg; ok.style.display = 'block'; setTimeout(() => ok.style.display = 'none', 2500); return; }
+    alert(msg);
+  }
 
   // ───────────────── helpers ─────────────────
   const isCodeLike = s => /^\s*\d+(?:-\d+)*\s*$/.test(String(s || ''));
@@ -199,6 +216,20 @@
       const r = await fetch(ep, { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
+
+      // —— 二次提示：命中 generic-links 且无商品 ——
+      const adapter = j?.adapter || j?.type;
+      const prelim = Array.isArray(j?.items) && j.items.length ? j.items
+                    : (Array.isArray(j?.products) ? j.products : []);
+      if ((adapter === 'generic-links' || adapter === 'GenericLinks') && prelim.length === 0) {
+        const msg = i18n[lang].hintNotCatalog;
+        toastInfo(msg);
+        rows = [];
+        renderTable();
+        if (status) status.textContent = msg;
+        if (btn) { btn.disabled = false; btn.textContent = i18n[lang].fetch; }
+        return; // 提前返回，不再显示“成功”
+      }
 
       const list = Array.isArray(j?.items) && j.items.length ? j.items
                  : (Array.isArray(j?.products) ? j.products : []);
