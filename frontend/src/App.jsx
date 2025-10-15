@@ -20,7 +20,7 @@ const i18nText = {
     export: '导出 Excel（.xlsx）',
     fetched: '抓取成功：共 %n 条（预览前 %m 条）',
     failed: '抓取失败：响应格式不正确，items 不是数组。',
-    link: '链接'
+    link: '链接', notCatalog: '该页面不是商品目录，请打开具体分类页再试'
   },
   de: {
     title: 'MVP3 — App',
@@ -31,7 +31,7 @@ const i18nText = {
     export: 'Excel exportieren (.xlsx)',
     fetched: 'Erfolg: Insgesamt %n Einträge (zeige %m).',
     failed: 'Fehler: Unerwartetes Antwortformat – items ist kein Array.',
-    link: 'Link'
+    link: 'Link', notCatalog: "This page isn’t a product catalog. Please open a specific category page and try again.", notCatalog: 'Diese Seite ist kein Produktkatalog. Bitte öffnen Sie eine konkrete Kategorieseite und versuchen Sie es erneut.'
   },
   en: {
     title: 'MVP3 — App',
@@ -73,6 +73,12 @@ export default function App() {
         headers: { 'X-Lang': apiLang },
       });
       const items = resp?.data?.items;
+      const adapter = resp?.data?.adapter || resp?.data?.type;
+      if ((adapter === 'generic-links' || adapter === 'GenericLinks') && (!Array.isArray(items) || items.length === 0)) {
+        alert(t.notCatalog);
+        setList([]);
+        return;
+      }
       if (!Array.isArray(items)) throw new Error('items_not_array');
       setList(items);
     } catch (e) {
