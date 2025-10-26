@@ -1,68 +1,68 @@
 // frontend/src/boot/api-base.js
-// 统一计算 API_BASE（优先级：?api → window.__API_BASE__ → VITE_API_BASE → 兜底）
+// 极简锁死版：所有请求都走公开网关，不再尝试聪明推理
 
-const FROM_QUERY = new URLSearchParams(location.search).get('api');
+// 我们已经验证过这个网关会正确转发到私有后端并返回抓取结果 ✅
+const API_BASE = 'https://yunivera-gateway.onrender.com';
 
-const FROM_RUNTIME =
-  (typeof window !== 'undefined'
-   && typeof window.__API_BASE__ === 'string'
-   && /^https?:\/\//i.test(window.__API_BASE__)) ? window.__API_BASE__ : '';
-
-const FROM_ENV =
-  (typeof import.meta !== 'undefined'
-   && import.meta?.env?.VITE_API_BASE
-   && /^https?:\/\//i.test(import.meta.env.VITE_API_BASE))
-    ? import.meta.env.VITE_API_BASE
-    : '';
-
-const FALLBACK = 'https://yunivera-gateway.onrender.com';
-
-const API_BASE =
-  (FROM_QUERY && /^https?:\/\//i.test(FROM_QUERY) && FROM_QUERY)
-  || FROM_RUNTIME
-  || FROM_ENV
-  || FALLBACK;
-
-// —— 直接写到 window，并打印出来，便于你在 Console 里一眼看到 —— //
+// 暴露到 window，方便在浏览器 Console 里肉眼确认
 try {
   window.__API_BASE_EFFECTIVE__ = API_BASE;
-  // 一次性日志（看到这行说明本文件已执行）
-  console.log('[api-base] EFFECTIVE =', API_BASE);
+  console.log('[api-base:minimal] Using API_BASE =', API_BASE);
 } catch (e) {
-  console.warn('[api-base] set window.__API_BASE_EFFECTIVE__ failed:', e);
+  console.warn('[api-base:minimal] failed to set window var:', e);
 }
 
-// 需要被“替换掉”的旧后端域名（可按需扩充）
-const OLD_HOST_PATTERNS = [
-  /\/\/yunivera-mvp2-[^/]+\.onrender\.com/i,
-  /\/\/yunivera-mvp2-cwyr\.onrender\.com/i
-];
-
-// 把指向“旧后端”的绝对 URL 改写到 API_BASE（保留原 pathname+search）
-function rewriter(url) {
+// 某些旧代码里还可能直接去请求私有后端（例如 http://yunivera-mvp2-private:10000）
+// 我们在这里做一个非常直接的“改写器”
+// 逻辑是：只要目标 URL 是指向那个私有后端，就把它换成 API_BASE 保留 path+query
+function rewriteToGateway(url) {
   try {
     const u = new URL(url, location.origin);
-    const hit = OLD_HOST_PATTERNS.some((re) => re.test(u.href));
-    if (!hit) return url; // 不是旧后端，原样返回
+
+    // 这里枚举“我们不想在浏览器里直接打的主机名”
+    const isPrivateBackend =
+      /yunivera-mvp2-private/i.test(u.hostname) ||
+      /yunivera-mvp2/i.test(u.hostname); // 保险一点，把带 yunivera-mvp2 的都算进去
+
+    if (!isPrivateBackend) {
+      // 不是私有后端，就不用改
+      return url;
+    }
+
+    // 把 path 和 search 接到公开网关上
     const base = new URL(API_BASE);
-    return base.origin + u.pathname + u.search;
+    const rewritten = base.origin + u.pathname + u.search;
+    return rewritten;
   } catch {
+    // URL() 失败就保留原样
     return url;
   }
 }
 
-// ---- patch fetch：入口最早执行，自动改写指向旧后端的请求 ----
-(function patchFetch() {
+// 最后一步：hook fetch
+// 这样即使老代码还在用 fetch("http://yunivera-mvp2-private:10000/xxx")
+// 浏览器里最终也会改成 fetch("https://yunivera-gateway.onrender.com/xxx")
+(function patchFetchToGateway() {
   if (typeof window === 'undefined' || !window.fetch) return;
-  const orig = window.fetch;
+  const origFetch = window.fetch;
+
   window.fetch = function (input, init) {
-    let url = (typeof input === 'string') ? input : input?.url;
-    if (url) {
-      const newUrl = rewriter(url);
-      if (newUrl !== url) {
-        input = (typeof input === 'string') ? newUrl : new Request(newUrl, input);
+    let out = input;
+
+    if (typeof input === 'string') {
+      out = rewriteToGateway(input);
+    } else if (input && typeof input === 'object' && input.url) {
+      const newUrl = rewriteToGateway(input.url);
+      if (newUrl !== input.url) {
+        // 重新构造 Request，把原 headers/method/body 都保留
+        out = new Request(newUrl, input);
       }
     }
-    return orig.call(this, input, init);
+
+    return origFetch.call(this, out, init);
   };
 })();
+
+// 给其它模块用：默认导出 API_BASE 本身
+export { API_BASE };
+export default API_BASE;
