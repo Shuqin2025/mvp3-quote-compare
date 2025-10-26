@@ -1,7 +1,7 @@
 // app-simple.js — 单页 UI + i18n + Excel(内嵌图片)
-// 统一拼接规则：  实际请求 = API_BASE + API_PREFIX(可能为''或'/v1') + (USE_API ? '/api' : '') + endpoint
-// 端点举例：健康 /health；业务 /catalog/parse、/image64
-// last-mod: 2025-10-12
+// 统一拼接规则：实际请求 = API_BASE + API_PREFIX(可能为''或'/v1') + (USE_API ? '/api' : '') + endpoint
+// endpoint 例子：/catalog/parse、/image64、/health
+// last-mod: 2025-10-26 final integration
 
 (() => {
   'use strict';
@@ -9,7 +9,8 @@
   const $ = (s, r = document) => r.querySelector(s);
   const isHttp = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
 
-  // ───────────────── 读取 API_BASE ─────────────────
+  // ───────────────── 读取 API_BASE / 网关地址 ─────────────────
+  // 来源优先级：（URL ?api=...）> window 变量 > <meta> > fallback
   const apiParam = new URLSearchParams(location.search).get('api');
   const fromBoot =
     (typeof window !== 'undefined') &&
@@ -18,12 +19,17 @@
   let fromEnv;
   try {
     const hasImportMeta = (typeof import.meta !== 'undefined');
-    fromEnv = (hasImportMeta && import.meta?.env?.VITE_API_BASE) ? import.meta.env.VITE_API_BASE : undefined;
+    fromEnv = (hasImportMeta && import.meta?.env?.VITE_API_BASE)
+      ? import.meta.env.VITE_API_BASE
+      : undefined;
   } catch { fromEnv = undefined; }
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
+
+  // 我们的后端网关（Render 上暴露给公众的服务）
   const FALLBACK_GATEWAY = 'https://yunivera-gateway.onrender.com';
 
+  // 决定最终使用的 API_BASE
   const API_BASE =
     (isHttp(apiParam) && apiParam) ||
     (isHttp(fromBoot) && fromBoot) ||
@@ -31,44 +37,49 @@
     (isHttp(fromMeta) && fromMeta) ||
     FALLBACK_GATEWAY;
 
+  // 暴露给开发者调试
   window.__API_BASE_EFFECTIVE__ = API_BASE;
 
-  // ───────────────── 可选鉴权头（仅当URL显式传入 ?auth= 才生效，避免无意预检） ─────────────────
+  // ───────────────── 可选鉴权头（目前我们用不到，就保留后门） ─────────────────
   const authParam = new URLSearchParams(location.search).get('auth');
   const AUTH = authParam ? String(authParam) : '';
   const AUTH_HEADERS = AUTH ? { Authorization: AUTH } : {};
   window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
 
-  // ───────────────── 自动探测（是否需要 /v1、是否需要 /api） ─────────────────
-  // 目标：确认两件事：
+  // ───────────────── 自动探测 ( /v1? /api? ) ─────────────────
+  // 我们的目标是自动判断两件事：
   //   1) API_PREFIX 是 '' 还是 '/v1'
-  //   2) USE_API 是否需要在路径中插入 '/api'
-  let API_PREFIX = '/v1';     // 针对网关默认先假设 '/v1'
-  let USE_API = true;         // 网关默认在 '/v1' 后还要 '/api'
+  //   2) USE_API 是否要额外加 '/api'
+  //
+  // 当前网关实际是 /v1/api/...，所以默认值设成这样：
+  let API_PREFIX = '/v1';
+  let USE_API = true;
   window.__API_PREFIX__ = API_PREFIX;
-  window.__USE_API__ = USE_API;
+  window.__USE_API__   = USE_API;
 
   async function detectPrefix() {
+    // 按顺序尝试三种可能:
     const tries = [
-      { pfx: '/v1', useApi: true,  url: `${API_BASE}/v1/api/health` },
-      { pfx: '/v1', useApi: false, url: `${API_BASE}/v1/health` },
-      { pfx: '',    useApi: false, url: `${API_BASE}/health` },
+      { pfx: '/v1', useApi: true,  url: `${API_BASE}/v1/api/health`   },
+      { pfx: '/v1', useApi: false, url: `${API_BASE}/v1/health`       },
+      { pfx: '',    useApi: false, url: `${API_BASE}/health`          },
     ];
     for (const t of tries) {
       try {
         const r = await fetch(t.url, { mode: 'cors' });
         if (r.ok) {
           API_PREFIX = t.pfx;
-          USE_API = t.useApi;
+          USE_API    = t.useApi;
           window.__API_PREFIX__ = API_PREFIX;
-          window.__USE_API__ = USE_API;
+          window.__USE_API__    = USE_API;
           return;
         }
       } catch { /* ignore */ }
     }
   }
 
-  // 辅助：拼接真实接口地址（传入 endpoint 必须以斜杠开头，如 '/catalog/parse'、'/image64'）
+  // 把 endpoint 拼成真正要请求的完整 URL
+  // endpoint 必须以斜杠开头，例如 '/catalog/parse'
   const buildApi = (endpoint) =>
     `${API_BASE}${API_PREFIX}${USE_API ? '/api' : ''}${endpoint}`;
 
@@ -130,30 +141,36 @@
     },
   };
 
+  // 当前语言（本地缓存）
   let lang = localStorage.getItem('mvp3_lang') || 'zh';
   function applyLang() {
     const t = i18n[lang];
-    $('#title') && ($('#title').textContent = t.title);
-    $('#subtitle') && ($('#subtitle').textContent = t.subtitle);
-    $('#url')?.setAttribute('placeholder', t.urlPh);
-    $('#btnFetch') && ($('#btnFetch').textContent = t.fetch);
+    $('#title')     && ($('#title').textContent     = t.title);
+    $('#subtitle')  && ($('#subtitle').textContent  = t.subtitle);
+    $('#url')       && $('#url').setAttribute('placeholder', t.urlPh);
+    $('#btnFetch')  && ($('#btnFetch').textContent  = t.fetch);
     $('#btnExport') && ($('#btnExport').textContent = t.export);
-    $('#btnClear') && ($('#btnClear').textContent = t.clear);
-    $('#status') && ($('#status').textContent = t.uiNoData);
+    $('#btnClear')  && ($('#btnClear').textContent  = t.clear);
+    $('#status')    && ($('#status').textContent    = t.uiNoData);
     const ths = $('#tbl thead tr')?.children || [];
     t.th.forEach((tx, i) => ths[i] && (ths[i].textContent = tx));
   }
   $('#langbar')?.addEventListener('click', e => {
     const l = e.target?.dataset?.lang;
     if (!l) return;
-    lang = l; localStorage.setItem('mvp3_lang', l); applyLang();
+    lang = l;
+    localStorage.setItem('mvp3_lang', l);
+    applyLang();
   });
   applyLang();
 
-  // —— 统一顶部右侧气泡提示 ——
+  // ── 顶部右上角小黑气泡提示（toast） ──
   function toastInfo(msg, ms = 2400) {
     try {
-      if (typeof window.toast === 'function') { window.toast(msg); return; }
+      if (typeof window.toast === 'function') {
+        window.toast(msg);
+        return;
+      }
       let bar = document.getElementById('__toast__');
       if (!bar) {
         bar = document.createElement('div');
@@ -163,18 +180,28 @@
       }
       const item = document.createElement('div');
       item.textContent = msg;
-      item.style.cssText = 'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.15);font-size:14px;max-width:360px;';
+      item.style.cssText =
+        'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;border-radius:10px;' +
+        'box-shadow:0 6px 18px rgba(0,0,0,.15);font-size:14px;max-width:360px;';
       bar.appendChild(item);
-      setTimeout(() => { item.style.opacity = '0'; item.style.transition = 'opacity .3s'; }, ms);
+      setTimeout(() => {
+        item.style.opacity = '0';
+        item.style.transition = 'opacity .3s';
+      }, ms);
       setTimeout(() => item.remove(), ms + 320);
-    } catch { alert(msg); }
-  }
-    alert(msg);
+    } catch {
+      alert(msg);
+    }
   }
 
   // ───────────────── helpers ─────────────────
-  const isCodeLike = s => /^\s*\d+(?:-\d+)*\s*$/.test(String(s || ''));
-  const idFromUrl = (u='') => { const m = /,(\d+)\.html(?:[?#].*)?$/i.exec(u); return m ? m[1] : ''; };
+  const isCodeLike = s =>
+    /^\s*\d+(?:-\d+)*\s*$/.test(String(s || ''));
+  const idFromUrl = (u='') => {
+    // 尝试从 URL 末尾 …,12345.html 提取数字 ID
+    const m = /,(\d+)\.html(?:[?#].*)?$/i.exec(u);
+    return m ? m[1] : '';
+  };
   const normalizeSku = it => {
     const sku = (it.sku ?? '').toString().trim();
     if (isCodeLike(sku)) return sku;
@@ -184,12 +211,13 @@
   };
   const firstImg = (x) => {
     if (x?.img_b64) return x.img_b64;
-    if (x?.img) return x.img;
+    if (x?.img)    return x.img;
     if (Array.isArray(x?.imgs) && x.imgs.length) return x.imgs[0];
     return '';
   };
 
   let rows = [];
+
   function renderTable() {
     const tb = $('#tbl tbody');
     if (!tb) return;
@@ -197,126 +225,161 @@
       <tr>
         <td>${i+1}</td>
         <td>${r.sku || '—'}</td>
-        <td>${r.img ? `<img src="${r.img}" style="height:54px;max-width:120px;object-fit:contain;border-radius:4px;background:#fff"/>` : ''}</td>
+        <td>${
+          r.img
+            ? `<img src="${r.img}" style="height:54px;max-width:120px;object-fit:contain;border-radius:4px;background:#fff"/>`
+            : ''
+        }</td>
         <td>${r.title || '—'}</td>
         <td>${r.moq || '—'}</td>
         <td>${r.price || ''}</td>
-        <td>${r.url ? `<a href="${r.url}" target="_blank" rel="noreferrer">${i18n[lang].linkText}</a>` : ''}</td>
+        <td>${
+          r.url
+            ? `<a href="${r.url}" target="_blank" rel="noreferrer">${i18n[lang].linkText}</a>`
+            : ''
+        }</td>
       </tr>
     `).join('');
   }
 
-  // ───────────────── 统一 GET 抓取目录（避免预检，匹配网关实现） ─────────────────
+  // ───────────────── 抓取目录按钮逻辑 ─────────────────
   async function doFetch() {
     const t = i18n[lang];
-    const btn = $('#btnFetch');
+    const btn    = $('#btnFetch');
     const status = $('#status');
 
     try {
-      const url = ($('#url')?.value || '').trim();
+      const url   = ($('#url')?.value || '').trim();
       if (!url) return;
       const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
-      if (btn) { btn.disabled = true; btn.textContent = t.fetch + '…'; }
-      if (status) status.textContent = t.loading;
+      if (btn)    { btn.disabled = true; btn.textContent = t.fetch + '…'; }
+      if (status) { status.textContent = t.loading; }
 
-      const ep = buildApi('/catalog/parse') + `?url=${encodeURIComponent(url)}&limit=${limit}`;
-      const r = await fetch(ep, { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } });
+      // 拼最终接口：/catalog/parse?url=...&limit=...
+      const ep = buildApi('/catalog/parse') +
+        `?url=${encodeURIComponent(url)}&limit=${limit}`;
+
+      const r = await fetch(ep, {
+        method: 'GET',
+        mode: 'cors',
+        headers: { ...AUTH_HEADERS },
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
 
-      // —— 二次提示：命中 generic-links 且无商品 ——
+      // 检查它是不是目录页（generic-links 但没有产品就提示用户）
       const adapter = j?.adapter || j?.type;
-      const prelim = Array.isArray(j?.items) && j.items.length ? j.items
-                    : (Array.isArray(j?.products) ? j.products : []);
-      if ((adapter === 'generic-links' || adapter === 'GenericLinks') && prelim.length === 0) {
-        const msg = i18n[lang].hintNotCatalog;
+      const prelim = Array.isArray(j?.items) && j.items.length
+        ? j.items
+        : (Array.isArray(j?.products) ? j.products : []);
+      if (
+        (adapter === 'generic-links' || adapter === 'GenericLinks') &&
+        prelim.length === 0
+      ) {
+        const msg = t.hintNotCatalog;
         toastInfo(msg);
         rows = [];
         renderTable();
         if (status) status.textContent = msg;
-        if (btn) { btn.disabled = false; btn.textContent = i18n[lang].fetch; }
-        return; // 提前返回，不再显示“成功”
+        if (btn) { btn.disabled = false; btn.textContent = t.fetch; }
+        return;
       }
 
-      const list = Array.isArray(j?.items) && j.items.length ? j.items
-                 : (Array.isArray(j?.products) ? j.products : []);
+      // 把后端返回的产品映射成我们表格使用的行
+      const list = Array.isArray(j?.items) && j.items.length
+        ? j.items
+        : (Array.isArray(j?.products) ? j.products : []);
       rows = list.map(x => ({
         sku:   normalizeSku(x),
         title: (x.title ?? '').toString().trim() || '—',
-        url:   x.url || '',
+        url:   x.url   || '',
         img:   firstImg(x),
         price: x.price || '',
         moq:   (x.moq ?? '').toString().trim() || '—',
       }));
 
       renderTable();
-      status && (status.textContent = t.success(rows.length, Math.min(rows.length, limit)));
+      status && (status.textContent = t.success(
+        rows.length,
+        Math.min(rows.length, limit),
+      ));
       $('#theadNote') && ($('#theadNote').textContent = url);
+
     } catch (e) {
       console.error(e);
-      $('#status') && ($('#status').textContent = i18n[lang].failFetch(e.message || e));
+      $('#status') &&
+        ($('#status').textContent = i18n[lang].failFetch(e.message || e));
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = i18n[lang].fetch; }
     }
   }
 
-  // ───────────────── 导出 Excel（按需 /image64，后端返回“纯base64文字”） ─────────────────
+  // ───────────────── 导出 Excel（把图也塞进 .xlsx） ─────────────────
   async function doExport() {
     const t = i18n[lang];
+
     if (!rows.length) { alert(t.pleaseFetch); return; }
     if (!window.ExcelJS) { alert('ExcelJS not loaded'); return; }
     const ExcelJS = window.ExcelJS;
 
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Catalog');
+
     ws.columns = [
-      { header: i18n[lang].th[1], key: 'sku',  width: 18 },
-      { header: i18n[lang].th[2], key: 'pic',  width: 22 },
-      { header: i18n[lang].th[3], key: 'title',width: 60 },
-      { header: i18n[lang].th[4], key: 'moq',  width: 10 },
-      { header: i18n[lang].th[5], key: 'price',width: 14 },
-      { header: i18n[lang].th[6], key: 'link', width: 12 },
+      { header: i18n[lang].th[1], key: 'sku',   width: 18 },
+      { header: i18n[lang].th[2], key: 'pic',   width: 22 },
+      { header: i18n[lang].th[3], key: 'title', width: 60 },
+      { header: i18n[lang].th[4], key: 'moq',   width: 10 },
+      { header: i18n[lang].th[5], key: 'price', width: 14 },
+      { header: i18n[lang].th[6], key: 'link',  width: 12 },
     ];
     ws.getRow(1).font = { bold: true };
 
     const metas = [];
     for (const r of rows) {
       const rr = ws.addRow({
-        sku: r.sku || '',
-        pic: '',
+        sku:   r.sku || '',
+        pic:   '',
         title: r.title,
-        moq: r.moq,
+        moq:   r.moq,
         price: r.price,
-        link: r.url ? { text: i18n[lang].linkText, hyperlink: r.url } : '',
+        link:  r.url ? { text: i18n[lang].linkText, hyperlink: r.url } : '',
       });
       rr.height = 78;
       metas.push({ row: rr.number, img: r.img });
     }
 
+    // 把 <img src="data:image/...base64"> 或普通 URL 转成真正的图片放进 Excel
     const parseDataUrl = (dataURL) => {
       const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
       if (!m) return null;
       const ct = m[1].toLowerCase();
       let ext = 'jpeg';
-      if (ct.includes('png')) ext = 'png';
+      if (ct.includes('png'))  ext = 'png';
       else if (ct.includes('webp')) ext = 'webp';
-      else if (ct.includes('gif')) ext = 'gif';
-      else if (ct.includes('bmp')) ext = 'bmp';
+      else if (ct.includes('gif'))  ext = 'gif';
+      else if (ct.includes('bmp'))  ext = 'bmp';
       return { raw: m[2], ext };
     };
+
     const guessExtFromUrl = (u='') => {
       const low = u.toLowerCase();
-      if (/\.(png)(\?|#|$)/.test(low)) return 'png';
+      if (/\.(png)(\?|#|$)/.test(low))  return 'png';
       if (/\.(webp)(\?|#|$)/.test(low)) return 'webp';
-      if (/\.(gif)(\?|#|$)/.test(low)) return 'gif';
-      if (/\.(bmp)(\?|#|$)/.test(low)) return 'bmp';
+      if (/\.(gif)(\?|#|$)/.test(low))  return 'gif';
+      if (/\.(bmp)(\?|#|$)/.test(low))  return 'bmp';
       return 'jpeg';
     };
+
     async function fetchB64ViaServer(imgUrl) {
-      const r = await fetch(buildApi('/image64') + `?url=${encodeURIComponent(imgUrl)}`, { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } });
+      // 让后端把图片转成纯base64，不触发浏览器跨域复杂逻辑
+      const r = await fetch(
+        buildApi('/image64') + `?url=${encodeURIComponent(imgUrl)}`,
+        { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } }
+      );
       if (!r.ok) throw new Error(`image64 HTTP ${r.status}`);
-      const raw = await r.text();       // 后端返回纯 base64
+      const raw = await r.text(); // 纯 base64 字符串
       const ext = guessExtFromUrl(imgUrl);
       return { raw, ext };
     }
@@ -328,45 +391,76 @@
         if (parsed) { ext = parsed.ext; raw = parsed.raw; }
         if (!raw && m.img) {
           const p = await fetchB64ViaServer(m.img);
-          ext = p.ext; raw = p.raw;
+          ext = p.ext;
+          raw = p.raw;
         }
         if (!raw) continue;
-        const id = wb.addImage({ base64: raw, extension: ext || 'jpeg' });
+
+        const id = wb.addImage({
+          base64: raw,
+          extension: ext || 'jpeg',
+        });
+
         const r0 = m.row - 1;
-        ws.addImage(id, { tl: { col: 1, row: r0 }, ext: { width: 120, height: 70 }, editAs: 'oneCell' });
+        ws.addImage(id, {
+          tl:   { col: 1, row: r0 },
+          ext:  { width: 120, height: 70 },
+          editAs: 'oneCell',
+        });
       } catch (e) {
         console.warn('embed image failed:', m.img, e?.message || e);
       }
     }
 
-    const filename = `catalog-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now()}.xlsx`;
-    const buf = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const filename =
+      `catalog-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now()}.xlsx`;
+    const buf  = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = filename;
     document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href); a.remove();
+    URL.revokeObjectURL(a.href);
+    a.remove();
 
     const ok = $('#okbar');
-    if (ok) { ok.textContent = t.okExport; ok.style.display = 'block'; setTimeout(() => ok.style.display = 'none', 2000); }
+    if (ok) {
+      ok.textContent = t.okExport;
+      ok.style.display = 'block';
+      setTimeout(() => { ok.style.display = 'none'; }, 2000);
+    }
   }
 
-  // ───────────────── 绑定 ─────────────────
-  $('#btnFetch')?.addEventListener('click', doFetch);
+  // ───────────────── 事件绑定 ─────────────────
+  $('#btnFetch') ?.addEventListener('click', doFetch);
   $('#btnExport')?.addEventListener('click', doExport);
-  $('#btnClear')?.addEventListener('click', () => { rows = []; renderTable(); $('#status') && ($('#status').textContent = i18n[lang].uiNoData); });
-  $('#url')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doFetch(); });
 
-  // 先探测一次（不阻塞）
+  $('#btnClear') ?.addEventListener('click', () => {
+    rows = [];
+    renderTable();
+    $('#status') && ($('#status').textContent = i18n[lang].uiNoData);
+  });
+
+  // 回车也可以触发抓取
+  $('#url')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doFetch();
+  });
+
+  // 启动时先尝试自动探测 prefix (/v1? /api?)
   detectPrefix().catch(()=>{});
 
-  // 轻量健康探测（不阻塞）
+  // 轻量健康检查，不阻塞 UI
   (async () => {
     try {
       const r = await fetch(buildApi('/health'), { mode: 'cors' });
       if (!r.ok) throw 0;
-    } catch {}
+      // 如果后端是 ok:true 也无所谓；我们只是在 console 观察
+      console.log('[health ok]');
+    } catch(e) {
+      console.warn('[health failed]', e);
+    }
   })();
 })();
