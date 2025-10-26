@@ -1,21 +1,23 @@
 // frontend/src/main.jsx
+// 挂 React 根节点 + 调试输出 API_BASE 给 window（避免 Tree-shaking）
 
-// ① 必须放在第一行：导入 boot 并“使用”导出的常量，避免构建器 Tree-shaking
-import { API_BASE } from "./boot/api-base";
-
-// ② 显式挂到 window，便于在浏览器 Console 验证
-window.__API_BASE_EFFECTIVE__ = API_BASE;
+import { API_BASE } from "./api-base";
 
 import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
 
-// —— 挂载根节点（保留你原来的保护逻辑）——
+// 把当前生效的 API_BASE 暴露到 window 方便我们在浏览器 Console 里验证
+window.__API_BASE_EFFECTIVE__ = API_BASE;
+window.API_BASE = API_BASE; // 兼容 app-simple.js 里尝试读取 window.API_BASE
+
+// 找页面上的 <div id="root">
 const el = document.getElementById("root");
 if (!el) {
-  const msg = "找不到 #root，请检查 index.html 中的 <div id=\"root\"></div>";
+  const msg = "找不到 #root，请检查 index.html 中的 <div id='root'></div>";
   console.error(msg);
-  document.body.innerHTML = `<pre style="padding:16px;color:#c00">${msg}</pre>`;
+  document.body.innerHTML =
+    `<pre style="padding:16px;color:#c00">${msg}</pre>`;
 } else {
   createRoot(el).render(<App />);
 }
