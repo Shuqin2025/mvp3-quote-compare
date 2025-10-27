@@ -1,7 +1,7 @@
 // app-simple.js — 单页 UI + i18n + Excel(内嵌图片)
 // 统一拼接规则：实际请求 = API_BASE + API_PREFIX(可能为''或'/v1') + (USE_API ? '/api' : '') + endpoint
 // endpoint 例子：/catalog/parse、/image64、/health
-// last-mod: 2025-10-26 final integration
+// last-mod: 2025-10-27 gateway-integration-stable
 
 (() => {
   'use strict';
@@ -14,7 +14,9 @@
   const apiParam = new URLSearchParams(location.search).get('api');
   const fromBoot =
     (typeof window !== 'undefined') &&
-    (window.__API_BASE__ || window.API_BASE || window.__API_BASE_EFFECTIVE__);
+    (window.__API_BASE__ ||
+     window.API_BASE ||
+     window.__API_BASE_EFFECTIVE__);
 
   let fromEnv;
   try {
@@ -26,10 +28,11 @@
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
 
-  // 我们的后端网关（Render 上暴露给公众的服务）
+  // 我们的公网网关（Render 上暴露给浏览器访问的服务）
+  // 这是我们已经亲手验证“能拿到catalog结果不返回404”的网关 host
   const FALLBACK_GATEWAY = 'https://yunivera-gateway.onrender.com';
 
-  // 决定最终使用的 API_BASE
+  // 最终 API_BASE = 网关根，比如 https://yunivera-gateway.onrender.com
   const API_BASE =
     (isHttp(apiParam) && apiParam) ||
     (isHttp(fromBoot) && fromBoot) ||
@@ -37,7 +40,7 @@
     (isHttp(fromMeta) && fromMeta) ||
     FALLBACK_GATEWAY;
 
-  // 暴露给开发者调试
+  // 方便在浏览器 Console 里确认当前网关
   window.__API_BASE_EFFECTIVE__ = API_BASE;
 
   // ───────────────── 可选鉴权头（目前我们用不到，就保留后门） ─────────────────
@@ -46,24 +49,33 @@
   const AUTH_HEADERS = AUTH ? { Authorization: AUTH } : {};
   window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
 
-  // ───────────────── 自动探测 ( /v1? /api? ) ─────────────────
+  // ───────────────── 自动探测 (/v1? /api?) ─────────────────
   // 我们的目标是自动判断两件事：
   //   1) API_PREFIX 是 '' 还是 '/v1'
-  //   2) USE_API 是否要额外加 '/api'
+  //   2) USE_API    是否要额外加 '/api'
   //
-  // 当前网关实际是 /v1/api/...，所以默认值设成这样：
+  // 真正上线的 yunivera-gateway 里，实际路由是 /v1/api/catalog/parse /v1/api/health /v1/api/image64
+  // 所以我们默认就是 '/v1' + '/api'
+  //
   let API_PREFIX = '/v1';
   let USE_API = true;
+
   window.__API_PREFIX__ = API_PREFIX;
-  window.__USE_API__   = USE_API;
+  window.__USE_API__    = USE_API;
 
   async function detectPrefix() {
-    // 按顺序尝试三种可能:
+    // 我们做一个“智能回退”：
+    // 1. 先试 /v1/api/health
+    // 2. 再试 /v1/health
+    // 3. 最后试 /health
+    //
+    // 哪个最先返回 r.ok === true，我们就采用哪个组合
     const tries = [
       { pfx: '/v1', useApi: true,  url: `${API_BASE}/v1/api/health`   },
       { pfx: '/v1', useApi: false, url: `${API_BASE}/v1/health`       },
       { pfx: '',    useApi: false, url: `${API_BASE}/health`          },
     ];
+
     for (const t of tries) {
       try {
         const r = await fetch(t.url, { mode: 'cors' });
@@ -74,14 +86,20 @@
           window.__USE_API__    = USE_API;
           return;
         }
-      } catch { /* ignore */ }
+      } catch {
+        // ignore, we'll fall through to defaults
+      }
     }
+
+    // 如果全都不通，保持默认 (/v1 + /api)。即使 health 探测失败，
+    // 真实抓取 /v1/api/catalog/parse 还是会成功（我们手动验证过）。
   }
 
-  // 把 endpoint 拼成真正要请求的完整 URL
+  // 根据 endpoint 组最终请求 URL
   // endpoint 必须以斜杠开头，例如 '/catalog/parse'
-  const buildApi = (endpoint) =>
-    `${API_BASE}${API_PREFIX}${USE_API ? '/api' : ''}${endpoint}`;
+  function buildApi(endpoint) {
+    return `${API_BASE}${API_PREFIX}${USE_API ? '/api' : ''}${endpoint}`;
+  }
 
   // ───────────────── i18n ─────────────────
   const i18n = {
@@ -152,6 +170,7 @@
     $('#btnExport') && ($('#btnExport').textContent = t.export);
     $('#btnClear')  && ($('#btnClear').textContent  = t.clear);
     $('#status')    && ($('#status').textContent    = t.uiNoData);
+
     const ths = $('#tbl thead tr')?.children || [];
     t.th.forEach((tx, i) => ths[i] && (ths[i].textContent = tx));
   }
@@ -175,15 +194,20 @@
       if (!bar) {
         bar = document.createElement('div');
         bar.id = '__toast__';
-        bar.style.cssText = 'position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;';
+        bar.style.cssText =
+          'position:fixed;right:16px;top:16px;z-index:99999;' +
+          'display:flex;flex-direction:column;gap:8px;';
         document.body.appendChild(bar);
       }
+
       const item = document.createElement('div');
       item.textContent = msg;
       item.style.cssText =
-        'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;border-radius:10px;' +
-        'box-shadow:0 6px 18px rgba(0,0,0,.15);font-size:14px;max-width:360px;';
+        'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;' +
+        'border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.15);' +
+        'font-size:14px;max-width:360px;';
       bar.appendChild(item);
+
       setTimeout(() => {
         item.style.opacity = '0';
         item.style.transition = 'opacity .3s';
@@ -197,18 +221,23 @@
   // ───────────────── helpers ─────────────────
   const isCodeLike = s =>
     /^\s*\d+(?:-\d+)*\s*$/.test(String(s || ''));
+
   const idFromUrl = (u='') => {
-    // 尝试从 URL 末尾 …,12345.html 提取数字 ID
+    // 从 URL 末尾 …,12345.html 抽可能的货号
     const m = /,(\d+)\.html(?:[?#].*)?$/i.exec(u);
     return m ? m[1] : '';
   };
+
   const normalizeSku = it => {
     const sku = (it.sku ?? '').toString().trim();
     if (isCodeLike(sku)) return sku;
+
     const fromUrl = idFromUrl(it.url || '');
     if (isCodeLike(fromUrl)) return fromUrl;
+
     return sku || '';
   };
+
   const firstImg = (x) => {
     if (x?.img_b64) return x.img_b64;
     if (x?.img)    return x.img;
@@ -257,6 +286,7 @@
       if (status) { status.textContent = t.loading; }
 
       // 拼最终接口：/catalog/parse?url=...&limit=...
+      // 真正发送到： https://yunivera-gateway.onrender.com/v1/api/catalog/parse?url=...&limit=...
       const ep = buildApi('/catalog/parse') +
         `?url=${encodeURIComponent(url)}&limit=${limit}`;
 
@@ -265,10 +295,11 @@
         mode: 'cors',
         headers: { ...AUTH_HEADERS },
       });
+
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
 
-      // 检查它是不是目录页（generic-links 但没有产品就提示用户）
+      // 如果后端的适配器告诉我们这是“纯链接页”而不是商品目录
       const adapter = j?.adapter || j?.type;
       const prelim = Array.isArray(j?.items) && j.items.length
         ? j.items
@@ -286,10 +317,11 @@
         return;
       }
 
-      // 把后端返回的产品映射成我们表格使用的行
+      // 把后端返回的产品投射成我们表格的列
       const list = Array.isArray(j?.items) && j.items.length
         ? j.items
         : (Array.isArray(j?.products) ? j.products : []);
+
       rows = list.map(x => ({
         sku:   normalizeSku(x),
         title: (x.title ?? '').toString().trim() || '—',
@@ -300,6 +332,7 @@
       }));
 
       renderTable();
+
       status && (status.textContent = t.success(
         rows.length,
         Math.min(rows.length, limit),
@@ -356,7 +389,7 @@
       if (!m) return null;
       const ct = m[1].toLowerCase();
       let ext = 'jpeg';
-      if (ct.includes('png'))  ext = 'png';
+      if (ct.includes('png'))   ext = 'png';
       else if (ct.includes('webp')) ext = 'webp';
       else if (ct.includes('gif'))  ext = 'gif';
       else if (ct.includes('bmp'))  ext = 'bmp';
@@ -452,12 +485,11 @@
   // 启动时先尝试自动探测 prefix (/v1? /api?)
   detectPrefix().catch(()=>{});
 
-  // 轻量健康检查，不阻塞 UI
+  // 轻量健康检查（不会阻塞主流程）
   (async () => {
     try {
       const r = await fetch(buildApi('/health'), { mode: 'cors' });
       if (!r.ok) throw 0;
-      // 如果后端是 ok:true 也无所谓；我们只是在 console 观察
       console.log('[health ok]');
     } catch(e) {
       console.warn('[health failed]', e);
