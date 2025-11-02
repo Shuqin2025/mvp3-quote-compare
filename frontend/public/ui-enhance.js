@@ -1,17 +1,6 @@
 /**
  * MVP3 前端增强脚本（完整替换版，含 rows/data/list/items/products 兼容）
- *
- * 目标：
- * 1) 所有后端请求一律走你提供的网关 API_BASE：
- *    API_BASE = location.search 里的 ?api=... ，例如：
- *    https://www.yunivera.com/?api=https://yunivera-gateway.onrender.com
- *
- * 2) 抓取逻辑（避免预检，全部 GET）：
- *    - 先调 /v1/api/detect?url=...
- *    - 再调 /v1/api/catalog/parse?... （尽量附上 t=adapter 提示后端）
- *
- * 3) 渲染产品表格，并支持导出（优先 .xlsx，缺少 ExcelJS 时回退 CSV）
- * 4) Console 注入调试日志，排查更方便
+ * 新增：防重复点击 + 抓取完成后自动滚动到结果表格
  */
 
 (() => {
@@ -80,7 +69,6 @@
    * 适配器映射 & 适配器推断逻辑 *
    ******************************/
 
-  // 后端 detect() 的类型名  ->  我们告诉后端 parse() 的 t= 值
   const TYPE_TO_T = {
     Shopify: "shopify",
     WooCommerce: "woocommerce",
@@ -91,7 +79,6 @@
     OpenCart: "opencart",
   };
 
-  // 我们再额外根据 URL 猜一遍，弥补 detect 不准的情况
   function guessAdapterFromUrl(url) {
     try {
       const u = new URL(url);
@@ -99,45 +86,25 @@
       const path = u.pathname.toLowerCase();
       const qs = u.search.toLowerCase();
 
-      // 站点专用优先：memoryking.de
-      if (/(^|\.)memoryking\.de$/.test(host)) {
-        return "memoryking";
-      }
+      if (/(^|\.)memoryking\.de$/.test(host)) return "memoryking";
 
-      // Shopify 常见特征
       if (
         host.endsWith("myshopify.com") ||
-        /(^|\.)kith\.com$/.test(host) ||
         path.includes("/collections/") ||
         path.includes("/products/")
-      ) {
-        return "shopify";
-      }
+      ) return "shopify";
 
-      // WooCommerce 常见目录
       if (
         path.includes("/product-category/") ||
-        path === "/shop/" ||
-        path.startsWith("/shop/") ||
+        path === "/shop/" || path.startsWith("/shop/") ||
         path.includes("/product-tag/")
-      ) {
-        return "woocommerce";
-      }
+      ) return "woocommerce";
 
-      // Shopware 常见 query / 路径
-      if (
-        /[?&](scategory|spage|sviewport)=/.test(qs) ||
-        path.includes("/listing/") ||
-        path.includes("/kategorie/") ||
-        path.includes("/kategorien/")
-      ) {
-        return "shopware";
-      }
+      if (/[?&](scategory|spage|sviewport)=/.test(qs) ||
+          path.includes("/listing/") || path.includes("/kategorie/") || path.includes("/kategorien/")
+      ) return "shopware";
 
-      // Magento 粗略特征
-      if (path.includes("/catalog/") || path.includes("/mage/")) {
-        return "magento";
-      }
+      if (path.includes("/catalog/") || path.includes("/mage/")) return "magento";
 
       return "";
     } catch {
@@ -162,7 +129,6 @@
         return null;
       }
       const j = await r.json();
-      // 期望 { ok:true, type:"Shopware" }
       if (j?.ok && j?.type) {
         console.info("[UI] detectType() =>", j.type);
         return j.type;
@@ -182,7 +148,7 @@
     qs.set("url", url);
     if (limit) qs.set("limit", String(limit));
 
-    // 温和的默认值；后端会忽略不认识的字段
+    // 温和默认值；后端会忽略不认识的字段
     qs.set("imgCount", "2");
     qs.set("compare", "1");
     qs.set("detailSkuMax", "8");
@@ -435,9 +401,20 @@
       return;
     }
 
+    // ===== 防重复点击：如果正在忙，直接返回
+    if (btn && (btn.disabled || btn.dataset.busy === "1")) return;
+
     // UI 状态
     clearTable();
-    if (btn) btn.disabled = true;
+    let btnTextBak = "";
+    if (btn) {
+      btnTextBak = btn.textContent || "";
+      btn.disabled = true;
+      btn.dataset.busy = "1";
+      btn.setAttribute("aria-busy", "true");
+      btn.style.pointerEvents = "none";
+      btn.textContent = btnTextBak ? `${btnTextBak}（抓取中…）` : "抓取中…";
+    }
     setToast("正在检测站点类型…");
 
     // 1) 先问后端 detect
@@ -449,7 +426,7 @@
       console.warn("[UI] detectType failed:", err);
     }
 
-    // 2) 再自己猜一遍（memoryking 等专用优先）
+    // 2) 自己再猜一遍
     const guessT = guessAdapterFromUrl(url);
 
     // 3) 合并成 hintT
@@ -476,12 +453,29 @@
         }
         const normRows = normalizeRows(data);
         renderRows(normRows);
+
+        // ===== 抓取成功后，自动滚动到结果表格
+        try {
+          const target = els.table || els.tbody || document.body;
+          if (target && typeof target.scrollIntoView === "function") {
+            target.scrollIntoView({ behavior: "smooth", block: "start" });
+          } else {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }
+        } catch {}
       }
     } catch (err) {
       console.error(err);
       setToast("抓取失败：" + (err.message || err), false);
     } finally {
-      if (btn) btn.disabled = false;
+      // 恢复按钮
+      if (btn) {
+        btn.disabled = false;
+        btn.dataset.busy = "";
+        btn.removeAttribute("aria-busy");
+        btn.style.pointerEvents = "";
+        if (btnTextBak) btn.textContent = btnTextBak;
+      }
     }
   }
 
@@ -496,19 +490,16 @@
     els.btnFetch.addEventListener("click", handleFetchClick);
   }
 
-  // 回车也能触发抓取
   if (els.urlInput?.addEventListener) {
     els.urlInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") handleFetchClick();
     });
   }
 
-  // 导出
   if (els.btnExport) {
     els.btnExport.addEventListener("click", exportXlsx);
   }
 
-  // 清空
   if (els.btnClear) {
     els.btnClear.addEventListener("click", () => {
       clearTable();
@@ -518,7 +509,7 @@
   }
 
   /*********************************
-   * 轻量自检：打一下健康检查日志   *
+   * 轻量自检：健康检查日志
    *********************************/
   (async () => {
     if (!API_BASE) return;
@@ -532,9 +523,6 @@
     }
   })();
 
-  /*****************************************
-   * 延迟日志：看看按钮 / DOM 是否都在线    *
-   *****************************************/
   setTimeout(() => {
     console.info("[UI] late-check DOM ready?", {
       btnFetch: !!els.btnFetch,
