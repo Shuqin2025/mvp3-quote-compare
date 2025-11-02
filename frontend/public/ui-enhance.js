@@ -100,7 +100,7 @@
       ) return "shopify";
 
       if (
-        path.includes("/product-category/") ||
+        path.includes("/product-category/") || 
         path === "/shop/" || path.startsWith("/shop/") ||
         path.includes("/product-tag/")
       ) return "woocommerce";
