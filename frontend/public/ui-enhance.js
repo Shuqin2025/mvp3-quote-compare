@@ -65,7 +65,12 @@
     if (els.tbody) els.tbody.innerHTML = "";
   }
 
-  /******************************
+  
+  // 取图兜底（前端容错）
+  function pickImgClient(row) {
+    return (row && (row.img || row.image || row.thumb || row.picture)) || "";
+  }
+/******************************
    * 适配器映射 & 适配器推断逻辑 *
    ******************************/
 
@@ -241,16 +246,17 @@
       const tdImg = document.createElement("td");
       if (r.img) {
         const imgEl = document.createElement("img");
-        const proxied = API_BASE
-          ? `${API_BASE}/v1/api/image?url=${encodeURIComponent(r.img)}`
-          : r.img;
-        imgEl.src = proxied;
-        imgEl.alt = r.title || "";
-        imgEl.referrerPolicy = "no-referrer";
-        imgEl.loading = "lazy";
-        imgEl.style.maxWidth = "80px";
-        imgEl.style.maxHeight = "80px";
-        tdImg.appendChild(imgEl);
+const src = pickImgClient(r) || r.img || "";
+const proxied = API_BASE
+  ? `${API_BASE}/v1/api/image?url=${encodeURIComponent(src)}`
+  : src;
+imgEl.src = proxied;
+imgEl.alt = r.title || "";
+imgEl.referrerPolicy = "no-referrer";
+imgEl.loading = "lazy";
+imgEl.style.maxWidth = "80px";
+imgEl.style.maxHeight = "80px";
+tdImg.appendChild(imgEl);
       } else {
         tdImg.textContent = "—";
       }
@@ -386,9 +392,7 @@
   async function handleFetchClick() {
     if (!API_BASE) {
       setToast("缺少网关参数 ?api=...，无法抓取", false);
-      console.warn(
-        "[UI] 没检测到 API_BASE。请用 https://www.yunivera.com/?api=https://yunivera-gateway.onrender.com 的形式打开页面。"
-      );
+      console.warn("[UI] 没检测到 API_BASE。请用 https://your.site/?api=https://your-gateway 的形式打开页面。");
       return;
     }
 
@@ -401,80 +405,49 @@
       return;
     }
 
-    // ===== 防重复点击：如果正在忙，直接返回
-    if (btn && (btn.disabled || btn.dataset.busy === "1")) return;
+    // 防重复点击
+    if (btn && btn.disabled) return;
+    const origText = btn ? (btn.textContent || "") : "";
 
-    // UI 状态
-    clearTable();
-    let btnTextBak = "";
     if (btn) {
-      btnTextBak = btn.textContent || "";
       btn.disabled = true;
-      btn.dataset.busy = "1";
-      btn.setAttribute("aria-busy", "true");
-      btn.style.pointerEvents = "none";
-      btn.textContent = btnTextBak ? `${btnTextBak}（抓取中…）` : "抓取中…";
-    }
-    setToast("正在检测站点类型…");
-
-    // 1) 先问后端 detect
-    let detectedType = "Unknown";
-    try {
-      const tpe = await detectType(url);
-      if (tpe) detectedType = tpe;
-    } catch (err) {
-      console.warn("[UI] detectType failed:", err);
+      btn.textContent = "抓取中…";
     }
 
-    // 2) 自己再猜一遍
-    const guessT = guessAdapterFromUrl(url);
-
-    // 3) 合并成 hintT
-    const hintT = guessT || TYPE_TO_T[detectedType] || "";
-
-    setToast(`开始抓取数据（${detectedType}）${hintT ? `（adapter: ${hintT}）` : "（adapter: auto）"} …`);
-
-    // 4) 读取条数
-    const limitVal = parseInt((limitSel && limitSel.value) || "50", 10) || 50;
-
-    // 5) 真正抓数据
     try {
-      const data = await parseCatalog(url, limitVal, hintT);
+      // 读取条数
+      const limitVal = parseInt((limitSel && limitSel.value) || "50", 10) || 50;
 
-      if (!data || data.ok === false) {
-        setToast(`抓取失败：${data?.error || "unknown"}`, false);
-      } else {
-        const list = pickArray(data);
-        const total = data.count || (Array.isArray(list) ? list.length : 0);
-        if (data.adapter) {
-          setToast(`抓取成功：共 ${total} 条（来源：${data.adapter}）`);
-        } else {
-          setToast(`抓取成功：共 ${total} 条`);
-        }
+      // 调后端
+      const qs = new URLSearchParams({ url, limit: String(limitVal) });
+      const finalUrl = `${API_BASE}/v1/api/catalog/parse?${qs.toString()}`;
+      const resp = await fetch(finalUrl, { method: "GET", mode: "cors", credentials: "omit", cache: "no-cache" });
+      const data = await resp.json();
+
+      // 兼容 rows/items/data/list
+      const rows = data.rows || data.items || data.data || data.list || [];
+
+      if (data && data.ok !== false) {
+        const total = data.count || rows.length || 0;
+        setToast(`抓取成功：共 ${total} 条${data.adapter ? `（来源：${data.adapter}）` : ""}`);
         const normRows = normalizeRows(data);
         renderRows(normRows);
 
-        // ===== 抓取成功后，自动滚动到结果表格
+        // 渲染后自动滚动到表格顶部
         try {
           const target = els.table || els.tbody || document.body;
-          if (target && typeof target.scrollIntoView === "function") {
-            target.scrollIntoView({ behavior: "smooth", block: "start" });
-          } else {
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }
+          if (target?.scrollIntoView) target.scrollIntoView({ behavior: "smooth", block: "start" });
         } catch {}
+      } else {
+        setToast(`抓取失败：${data?.error || "unknown"}`, false);
       }
     } catch (err) {
-      console.error(err);
-      setToast("抓取失败：" + (err.message || err), false);
+      console.error("[UI] fetch error", err);
+      setToast("抓取失败", false);
     } finally {
-      // 恢复按钮
       if (btn) {
         btn.disabled = false;
-        btn.dataset.busy = "";
-        btn.removeAttribute("aria-busy");
-        btn.style.pointerEvents = "";
-        if (btnTextBak) btn.textContent = btnTextBak;
+        btn.textContent = origText;
       }
     }
   }
