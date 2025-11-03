@@ -293,6 +293,13 @@ tdImg.appendChild(imgEl);
         a.style.fontSize = "12px";
         tdLink.appendChild(a);
       } else { tdLink.textContent = "—"; }
+      // ✅ 把所有单元格按列顺序插入
+      tr.appendChild(tdIdx);
+      tr.appendChild(tdSku);
+      tr.appendChild(tdImg);
+      tr.appendChild(tdTitle);
+      tr.appendChild(tdMoq);
+      tr.appendChild(tdPrice);
       tr.appendChild(tdLink);
 
       frag.appendChild(tr);
