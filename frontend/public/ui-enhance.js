@@ -207,7 +207,11 @@
 
     return list.map((p) => {
       const link = toAbs(p.link || p.url || "");
-      const imgCandidate = p.img || (Array.isArray(p.imgs) ? p.imgs[0] : "");
+      let imgCandidate = p.img || (Array.isArray(p.imgs) ? p.imgs[0] : "");
+      if (/loader\.svg|placeholder|spacer\.gif/i.test(String(imgCandidate || "")) && Array.isArray(p.imgs)) {
+        const alt = p.imgs.find(x => !/loader\.svg|placeholder|spacer\.gif/i.test(String(x || "")));
+        if (alt) imgCandidate = alt;
+      }
       const imgAbs = toAbs(imgCandidate);
 
       return {
@@ -380,7 +384,7 @@
       });
 
       // —— 尝试内嵌前 50 张图片（失败自动忽略，单元格保留 URL）——
-      const N = lastRows.length;
+      const N = Math.min(50, lastRows.length);
       const colImgIndex = 3; // C 列（1-based）
       for (let i = 0; i < N; i++) {
         const r = lastRows[i];
@@ -394,7 +398,8 @@
           const ct = String(j.contentType || "image/jpeg").toLowerCase();
           const ext = ct.includes("png") ? "png" : ct.includes("gif") ? "gif" :
                       ct.includes("webp") ? "webp" : "jpeg";
-          const imageId = wb.addImage({ base64: j.base64, extension: ext });
+          const pure = j.base64.startsWith('data:') ? j.base64.split(',')[1] : j.base64;
+          const imageId = wb.addImage({ base64: pure, extension: ext });
           const rowIndex = i + 2; // 第1行为表头
           ws.getRow(rowIndex).height = 90;
           ws.addImage(imageId, { tl: { col: colImgIndex - 1, row: rowIndex - 1 }, ext: { width: 120, height: 80 } });
