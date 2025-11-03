@@ -245,18 +245,15 @@
       // 3 图片（统一走网关代理，避免跨域）
       const tdImg = document.createElement("td");
       if (r.img) {
-        const imgEl = document.createElement("img");
-const src = pickImgClient(r) || r.img || "";
-const proxied = API_BASE
-  ? `${API_BASE}/v1/api/image?url=${encodeURIComponent(src)}`
-  : src;
-imgEl.src = proxied;
-imgEl.alt = r.title || "";
-imgEl.referrerPolicy = "no-referrer";
-imgEl.loading = "lazy";
-imgEl.style.maxWidth = "80px";
-imgEl.style.maxHeight = "80px";
-tdImg.appendChild(imgEl);
+        const img = document.createElement('img');
+img.loading = 'lazy';
+img.decoding = 'async';
+img.referrerPolicy = 'no-referrer'; // 关键：禁止携带 Referer
+img.alt = ((r.sku || r.title || '') + '').slice(0, 60);
+img.src = (r.img || r.image || r.picture || r.thumb || ''); // 兼容多个别名
+// 兜底：直链被拦截时降级为占位图（可替换为你项目里的占位资源）
+img.onerror = () => { img.onerror = null; img.src = '/public/img/no-image.png'; img.classList.add('img-fallback'); };
+tdImg.appendChild(img);
       } else {
         tdImg.textContent = "—";
       }
@@ -409,10 +406,7 @@ tdImg.appendChild(imgEl);
     if (btn && btn.disabled) return;
     const origText = btn ? (btn.textContent || "") : "";
 
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = "抓取中…";
-    }
+    if (btn) { btn.disabled = true; btn.textContent = '抓取中…'; btn.classList && btn.classList.add('is-loading'); }
 
     try {
       // 读取条数
@@ -445,10 +439,7 @@ tdImg.appendChild(imgEl);
       console.error("[UI] fetch error", err);
       setToast("抓取失败", false);
     } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = origText;
-      }
+      if (btn) { btn.disabled = false; btn.textContent = origText; btn.classList && btn.classList.remove('is-loading'); }
     }
   }
 
