@@ -242,22 +242,27 @@
       const tdSku = document.createElement("td");
       tdSku.textContent = r.sku || "—";
 
-      // 3 图片（统一走网关代理，避免跨域）
+      // 3 图片：先用直链，失败再走网关代理（format=raw）
       const tdImg = document.createElement("td");
       if (r.img) {
         const imgEl = document.createElement("img");
-const src = pickImgClient(r) || r.img || "";
-const proxied = API_BASE
-  ? `${API_BASE}/v1/api/image?url=${encodeURIComponent(src)}`
-  : src;
-imgEl.src = proxied;
-imgEl.alt = r.title || "";
-imgEl.referrerPolicy = "no-referrer";
-imgEl.loading = "lazy";
-imgEl.style.maxWidth = "80px";
-imgEl.style.maxHeight = "80px";
-tdImg.appendChild(imgEl);
+        const srcRaw = (pickImgClient(r) || r.img || "");
+        const srcProxy = API_BASE
+          ? `${API_BASE}/v1/api/image?format=raw&url=${encodeURIComponent(srcRaw)}`
+          : srcRaw;
+        // Memoryking 等站可能返回 loader.svg 等占位图；若命中占位，直接走代理
+        const isPlaceholder = /loader\.svg|placeholder|spacer\.gif/i.test(srcRaw);
+        const firstSrc = isPlaceholder ? srcProxy : srcRaw;
+        imgEl.src = firstSrc;
+        imgEl.onerror = () => { if (imgEl.src != srcProxy) imgEl.src = srcProxy; };
+        imgEl.alt = r.title || "";
+        imgEl.referrerPolicy = "no-referrer";
+        imgEl.loading = "lazy";
+        imgEl.style.maxWidth = "80px";
+        imgEl.style.maxHeight = "80px";
+        tdImg.appendChild(imgEl);
       } else {
+
         tdImg.textContent = "—";
       }
 
@@ -374,6 +379,27 @@ tdImg.appendChild(imgEl);
         });
       });
 
+      // —— 尝试内嵌前 50 张图片（失败自动忽略，单元格保留 URL）——
+      const N = lastRows.length;
+      const colImgIndex = 3; // C 列（1-based）
+      for (let i = 0; i < N; i++) {
+        const r = lastRows[i];
+        const url = r?.img ? String(r.img) : "";
+        if (!url || !API_BASE) continue;
+        try {
+          const api = `${API_BASE}/v1/api/image?format=base64&url=${encodeURIComponent(url)}`;
+          const resp = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
+          const j = await resp.json();
+          if (!j?.ok || !j?.base64) continue;
+          const ct = String(j.contentType || "image/jpeg").toLowerCase();
+          const ext = ct.includes("png") ? "png" : ct.includes("gif") ? "gif" :
+                      ct.includes("webp") ? "webp" : "jpeg";
+          const imageId = wb.addImage({ base64: j.base64, extension: ext });
+          const rowIndex = i + 2; // 第1行为表头
+          ws.getRow(rowIndex).height = 90;
+          ws.addImage(imageId, { tl: { col: colImgIndex - 1, row: rowIndex - 1 }, ext: { width: 120, height: 80 } });
+        } catch {}
+      }
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
