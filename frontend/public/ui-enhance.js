@@ -245,15 +245,18 @@
       // 3 图片（统一走网关代理，避免跨域）
       const tdImg = document.createElement("td");
       if (r.img) {
-        const img = document.createElement('img');
-img.loading = 'lazy';
-img.decoding = 'async';
-img.referrerPolicy = 'no-referrer'; // 关键：禁止携带 Referer
-img.alt = ((r.sku || r.title || '') + '').slice(0, 60);
-img.src = (r.img || r.image || r.picture || r.thumb || ''); // 兼容多个别名
-// 兜底：直链被拦截时降级为占位图（可替换为你项目里的占位资源）
-img.onerror = () => { img.onerror = null; img.src = '/public/img/no-image.png'; img.classList.add('img-fallback'); };
-tdImg.appendChild(img);
+        const imgEl = document.createElement("img");
+const src = pickImgClient(r) || r.img || "";
+const proxied = API_BASE
+  ? `${API_BASE}/v1/api/image?url=${encodeURIComponent(src)}`
+  : src;
+imgEl.src = proxied;
+imgEl.alt = r.title || "";
+imgEl.referrerPolicy = "no-referrer";
+imgEl.loading = "lazy";
+imgEl.style.maxWidth = "80px";
+imgEl.style.maxHeight = "80px";
+tdImg.appendChild(imgEl);
       } else {
         tdImg.textContent = "—";
       }
@@ -274,25 +277,22 @@ tdImg.appendChild(img);
           : r.price
         : "—";
 
-      // 7 链接
+      // 7 链接（小图标按钮）
       const tdLink = document.createElement("td");
       if (r.link || r.url) {
         const a = document.createElement("a");
         a.href = r.link || r.url;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        a.textContent = "链接";
+        a.title = "打开商品页";
+        a.textContent = "🔗 链接";
+        a.style.textDecoration = "none";
+        a.style.padding = "4px 8px";
+        a.style.border = "1px solid #ddd";
+        a.style.borderRadius = "6px";
+        a.style.fontSize = "12px";
         tdLink.appendChild(a);
-      } else {
-        tdLink.textContent = "—";
-      }
-
-      tr.appendChild(tdIdx);
-      tr.appendChild(tdSku);
-      tr.appendChild(tdImg);
-      tr.appendChild(tdTitle);
-      tr.appendChild(tdMoq);
-      tr.appendChild(tdPrice);
+      } else { tdLink.textContent = "—"; }
       tr.appendChild(tdLink);
 
       frag.appendChild(tr);
@@ -406,7 +406,10 @@ tdImg.appendChild(img);
     if (btn && btn.disabled) return;
     const origText = btn ? (btn.textContent || "") : "";
 
-    if (btn) { btn.disabled = true; btn.textContent = '抓取中…'; btn.classList && btn.classList.add('is-loading'); }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "抓取中…";
+    }
 
     try {
       // 读取条数
@@ -439,7 +442,10 @@ tdImg.appendChild(img);
       console.error("[UI] fetch error", err);
       setToast("抓取失败", false);
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = origText; btn.classList && btn.classList.remove('is-loading'); }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = origText;
+      }
     }
   }
 
