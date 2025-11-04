@@ -365,7 +365,7 @@
         { header: "描述", key: "title", width: 40 },
         { header: "起订量", key: "moq", width: 10 },
         { header: "单价", key: "price", width: 15 },
-        { header: "链接", key: "link", width: 40 },
+        { header: "链接", key: "link", width: 12 },
       ];
       lastRows.forEach((r, i) => {
         ws.addRow({
@@ -380,7 +380,8 @@
       });
 
       // —— 尝试内嵌前 50 张图片（失败自动忽略，单元格保留 URL）——
-      const N = lastRows.length;
+      const MAX_EMBED = 200;
+      const N = Math.min(lastRows.length, MAX_EMBED);
       const colImgIndex = 3; // C 列（1-based）
       for (let i = 0; i < N; i++) {
         const r = lastRows[i];
@@ -390,18 +391,28 @@
           const api = `${API_BASE}/v1/api/image?format=base64&url=${encodeURIComponent(url)}`;
           const resp = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
           const j = await resp.json();
-          if (!(j && j.ok === true && j.base64)) continue;
+          if (!j?.ok || !j?.base64) continue;
           const ct = String(j.contentType || "image/jpeg").toLowerCase();
           const ext = ct.includes("png") ? "png" : ct.includes("gif") ? "gif" :
                       ct.includes("webp") ? "webp" : "jpeg";
-          const pure = j.base64.startsWith('data:') ? j.base64.split(',')[1] : j.base64;
-        const imageId = wb.addImage({ base64: pure, extension: ext });
+          const imageId = wb.addImage({ base64: j.base64, extension: ext });
           const rowIndex = i + 2; // 第1行为表头
           ws.getRow(rowIndex).height = 90;
           ws.addImage(imageId, { tl: { col: colImgIndex - 1, row: rowIndex - 1 }, ext: { width: 120, height: 80 } });
         } catch {}
       }
-      const buf = await wb.xlsx.writeBuffer();
+              // —— 链接列：改为显示 “🔗 链接” 的超链接对象 ——
+              // 列顺序: 1:# 2:货号 3:图片 4:描述 5:起订量 6:单价 7:链接
+              for (let i = 0; i < lastRows.length; i++) {
+                const rowIndex = i + 2;
+                const linkUrl = lastRows[i].link || lastRows[i].url || "";
+                if (!linkUrl) continue;
+                ws.getCell(rowIndex, 7).value = { text: "🔗 链接", hyperlink: linkUrl };
+                ws.getCell(rowIndex, 7).style.font = { color: { argb: "FF2F80ED" }, underline: true };
+              }
+      
+              const buf = await wb.xlsx.writeBuffer();
+
       const blob = new Blob([buf], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
