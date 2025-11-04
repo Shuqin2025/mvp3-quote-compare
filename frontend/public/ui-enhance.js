@@ -1,3 +1,4 @@
+
 /**
  * MVP3 前端增强脚本（完整替换版，含 rows/data/list/items/products 兼容）
  * 新增：防重复点击 + 抓取完成后自动滚动到结果表格
@@ -391,11 +392,14 @@
           const api = `${API_BASE}/v1/api/image?format=base64&url=${encodeURIComponent(url)}`;
           const resp = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
           const j = await resp.json();
-          if (!j?.ok || !j?.base64) continue;
+          if (!(j && j.ok && j.base64)) continue;
           const ct = String(j.contentType || "image/jpeg").toLowerCase();
           const ext = ct.includes("png") ? "png" : ct.includes("gif") ? "gif" :
                       ct.includes("webp") ? "webp" : "jpeg";
-          const imageId = wb.addImage({ base64: j.base64, extension: ext });
+          const pure = j.base64 && j.base64.startsWith("data:")
+  ? j.base64.split(",")[1]
+  : j.base64;
+const imageId = wb.addImage({ base64: pure, extension: ext });
           const rowIndex = i + 2; // 第1行为表头
           ws.getRow(rowIndex).height = 90;
           ws.addImage(imageId, { tl: { col: colImgIndex - 1, row: rowIndex - 1 }, ext: { width: 120, height: 80 } });
