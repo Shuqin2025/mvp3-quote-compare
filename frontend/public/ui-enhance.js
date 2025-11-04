@@ -1,4 +1,3 @@
-
 /**
  * MVP3 前端增强脚本（完整替换版，含 rows/data/list/items/products 兼容）
  * 新增：防重复点击 + 抓取完成后自动滚动到结果表格
