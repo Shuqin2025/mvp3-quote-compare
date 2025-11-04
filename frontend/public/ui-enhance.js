@@ -473,7 +473,7 @@
   if (els.urlInput?.addEventListener) {
     els.urlInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") handleFetchClick(); });
   }
-  if (els.btnExport) { els.btnExport.addEventListener("click", exportXlsx); }
+  if (els.btnExport) { els.btnExport.addEventListener("click", onExport); }
   if (els.btnClear) {
     els.btnClear.addEventListener("click", () => { clearTable(); lastRows = []; setToast("已清空"); });
   }
@@ -497,3 +497,8 @@
       { btnFetch: !!els.btnFetch, urlInput: !!els.urlInput, tbody: !!els.tbody, API_BASE });
   }, 800);
 })();
+
+// === 导出 Excel（别名：按钮直接调用） ===
+async function onExport(){
+  try { await exportXlsx(); } catch(e) { console.error(e); }
+}
