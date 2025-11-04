@@ -379,7 +379,7 @@
         });
       });
 
-      // —— 尝试内嵌前 50 张图片（失败自动忽略，单元格保留 URL）——
+      // —— 尝试内嵌前 200 张图片（失败自动忽略，单元格保留 URL）——
       const MAX_EMBED = 200;
       const N = Math.min(lastRows.length, MAX_EMBED);
       const colImgIndex = 3; // C 列（1-based）
