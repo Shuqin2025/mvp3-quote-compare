@@ -496,6 +496,7 @@
     console.info("[UI] late-check DOM ready?",
       { btnFetch: !!els.btnFetch, urlInput: !!els.urlInput, tbody: !!els.tbody, API_BASE });
   }, 800);
-})();
-
-}
+-})();
+-
+-}
++})();
