@@ -1,6 +1,6 @@
 /**
  * ui-enhance.js — 前端增强脚本（完整替换版）
- * 版本：2025-11-05-1
+ * 版本：2025-11-05-2
  *
  * 解决点：
  *  1) 继续使用 GET 调用 /v1/api/catalog/parse，避免 CORS 预检；附带 t= 类型提示。
@@ -12,16 +12,12 @@
  *     渲染后自动滚到表格顶部；抓取按钮防重复点击。
  *
  * ⚠️ 请确保页面引用带版本号以绕过缓存：
- *    <script type="module" src="/ui-enhance.js?v=2025-11-05-1"></script>
+ *    <script type="module" src="/ui-enhance.js?v=2025-11-05-2"></script>
  */
 (() => {
-  /********************
-   * 工具函数 & DOM引用 *
-   ********************/
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  // 从 ?api= 解析 API_BASE（去掉末尾的 /）
   function getApiBase() {
     try {
       const u = new URL(location.href);
@@ -34,7 +30,6 @@
   const API_BASE = getApiBase();
   console.info("[UI] API_BASE =", API_BASE);
 
-  // DOM 引用（宽松匹配你的静态页）
   const els = {
     urlInput:
       $("#txtUrl") ||
@@ -73,14 +68,10 @@
     if (els.tbody) els.tbody.innerHTML = "";
   }
 
-  // 客户端取图字段兜底
   function pickImgClient(row) {
     return (row && (row.img || row.image || row.thumb || row.picture)) || "";
   }
 
-  /******************************
-   * 适配器映射 & 适配器推断逻辑 *
-   ******************************/
   function guessAdapterFromUrl(url) {
     try {
       const u = new URL(url);
@@ -126,14 +117,11 @@
     }
   }
 
-  /***********************************
-   * 后端交互：parseCatalog() (GET)  *
-   ***********************************/
   async function parseCatalog(url, limit, hintT) {
     const qs = new URLSearchParams();
     qs.set("url", url);
     if (limit) qs.set("limit", String(limit));
-    qs.set("imgCount", "2");           // 轻量默认值，后端不认会忽略
+    qs.set("imgCount", "2");
     qs.set("compare", "1");
     qs.set("detailSkuMax", "8");
     qs.set("imgDelim", " ");
@@ -143,7 +131,7 @@
     console.info("[UI] parseCatalog GET →", finalUrl);
 
     const resp = await fetch(finalUrl, {
-      method: "GET", // 关键：GET，避免预检
+      method: "GET",
       mode: "cors",
       credentials: "omit",
       cache: "no-cache",
@@ -153,10 +141,7 @@
     return data;
   }
 
-  /************************
-   * 数据标准化 & 渲染表格 *
-   ************************/
-  let lastRows = []; // 导出时使用
+  let lastRows = [];
 
   function pickArray(data) {
     if (Array.isArray(data?.rows)) return data.rows;
@@ -211,21 +196,17 @@
     rows.forEach((r, idx) => {
       const tr = document.createElement("tr");
 
-      // 1 序号
       const tdIdx = document.createElement("td");
       tdIdx.textContent = String(idx + 1);
 
-      // 2 货号
       const tdSku = document.createElement("td");
       tdSku.textContent = r.sku || "—";
 
-      // 3 图片
       const tdImg = document.createElement("td");
       if (r.img) {
         const imgEl = document.createElement("img");
         const srcRaw = (pickImgClient(r) || r.img || "");
 
-        // memoryking：统一使用代理，避免 logo/懒加载失效
         const mustProxy = /(^|\.)memoryking\.de$/.test(srcHost);
         const proxyUrl = API_BASE
           ? `${API_BASE}/v1/api/image?format=raw&url=${encodeURIComponent(srcRaw)}`
@@ -247,19 +228,15 @@
         tdImg.textContent = "—";
       }
 
-      // 4 描述
       const tdTitle = document.createElement("td");
       tdTitle.textContent = r.title || r.desc || "—";
 
-      // 5 起订量
       const tdMoq = document.createElement("td");
       tdMoq.textContent = r.moq || "—";
 
-      // 6 单价
       const tdPrice = document.createElement("td");
       tdPrice.textContent = r.price ? (r.currency ? `${r.price} ${r.currency}` : r.price) : "—";
 
-      // 7 链接（小按钮“🔗 链接”）
       const tdLink = document.createElement("td");
       if (r.link || r.url) {
         const a = document.createElement("a");
@@ -290,9 +267,6 @@
     if (els.tbody) els.tbody.appendChild(frag);
   }
 
-  /*****************
-   * 导出（xlsx/csv）
-   *****************/
   async function exportXlsx() {
     if (!lastRows?.length) {
       setToast("没有可以导出的数据", false);
@@ -301,7 +275,6 @@
 
     const hasExcel = !!window.ExcelJS;
     if (!hasExcel) {
-      // 回退 CSV（链接列依然是 URL，属于次优方案）
       const header = ["#", "货号", "图片", "描述", "起订量", "单价", "链接"];
       const lines = [header.join(",")];
       lastRows.forEach((r, i) => {
@@ -351,34 +324,34 @@
         });
       });
 
-      // 内嵌前 200 张图片
       const MAX_EMBED = 200;
       const N = Math.min(lastRows.length, MAX_EMBED);
-      const colImgIndex = 3; // C 列（1-based）
+      const colImgIndex = 3;
       for (let i = 0; i < N; i++) {
         const r = lastRows[i];
-        const url = r?.img ? String(r.img) : "";
-        if (!url || !API_BASE) continue;
+        const imgUrl = r?.img ? String(r.img) : "";
+        if (!imgUrl || !API_BASE) continue;
         try {
-          const api = `${API_BASE}/v1/api/image?format=base64&url=${encodeURIComponent(url)}`;
+          const api = `${API_BASE}/v1/api/image?format=base64&url=${encodeURIComponent(imgUrl)}`;
           const resp = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
           const j = await resp.json();
           if (!(j && j.ok && j.base64)) continue;
+
           const ct = String(j.contentType || "image/jpeg").toLowerCase();
           const ext =
             ct.includes("png") ? "png" :
             ct.includes("gif") ? "gif" :
             ct.includes("webp") ? "webp" : "jpeg";
+
           const base64 = j.base64.startsWith("data:") ? j.base64.split(",")[1] : j.base64;
 
           const imageId = wb.addImage({ base64, extension: ext });
-          const rowIndex = i + 2; // 第 1 行是表头
+          const rowIndex = i + 2;
           ws.getRow(rowIndex).height = 90;
           ws.addImage(imageId, { tl: { col: colImgIndex - 1, row: rowIndex - 1 }, ext: { width: 120, height: 80 } });
         } catch {}
       }
 
-      // 把链接列显示为“🔗 链接”文本
       for (let i = 0; i < lastRows.length; i++) {
         const rowIndex = i + 2;
         const linkUrl = lastRows[i].link || lastRows[i].url || "";
@@ -388,9 +361,7 @@
       }
 
       const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = "catalog.xlsx";
@@ -403,9 +374,6 @@
     }
   }
 
-  /*********************************
-   * 点击“抓取目录”主流程入口函数  *
-   *********************************/
   async function handleFetchClick() {
     if (!API_BASE) {
       setToast("缺少网关参数 ?api=...，无法抓取", false);
@@ -420,16 +388,13 @@
       return;
     }
 
-    // 防重复点击
     if (btn && btn.disabled) return;
     const origText = btn ? (btn.textContent || "") : "";
     if (btn) { btn.disabled = true; btn.textContent = "抓取中…"; }
 
     try {
-      // 条数
       const limitVal = parseInt((limitSel && limitSel.value) || "50", 10) || 50;
 
-      // 推断/后端检测适配器
       let t = guessAdapterFromUrl(url);
       if (!t) {
         try { t = await detectType(url); } catch {}
@@ -445,7 +410,6 @@
         const normRows = normalizeRows(data);
         renderRows(normRows);
 
-        // 渲染后自动滚动到表格
         try {
           const target = els.table || els.tbody || document.body;
           if (target?.scrollIntoView) target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -461,9 +425,6 @@
     }
   }
 
-  /*****************
-   * 事件绑定与自检 *
-   *****************/
   if (els.btnFetch) {
     if ((els.btnFetch.getAttribute("type") || "").toLowerCase() !== "button") {
       els.btnFetch.setAttribute("type", "button");
@@ -478,7 +439,6 @@
     els.btnClear.addEventListener("click", () => { clearTable(); lastRows = []; setToast("已清空"); });
   }
 
-  // 轻量健康检查日志 & 版本号
   (async () => {
     if (!API_BASE) return;
     const healthUrl = `${API_BASE}/v1/api/health`;
@@ -491,7 +451,7 @@
     }
   })();
 
-  console.info("[UI] ui-enhance.js version = 2025-11-05-1");
+  console.info("[UI] ui-enhance.js version = 2025-11-05-2");
   setTimeout(() => {
     console.info("[UI] late-check DOM ready?",
       { btnFetch: !!els.btnFetch, urlInput: !!els.urlInput, tbody: !!els.tbody, API_BASE });
