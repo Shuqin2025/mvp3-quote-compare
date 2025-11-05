@@ -1,6 +1,6 @@
 /**
  * ui-enhance.js — 前端增强脚本（完整替换版）
- * 版本：2025-11-04-2
+ * 版本：2025-11-05-1
  *
  * 解决点：
  *  1) 继续使用 GET 调用 /v1/api/catalog/parse，避免 CORS 预检；附带 t= 类型提示。
@@ -12,7 +12,7 @@
  *     渲染后自动滚到表格顶部；抓取按钮防重复点击。
  *
  * ⚠️ 请确保页面引用带版本号以绕过缓存：
- *    <script type="module" src="/ui-enhance.js?v=2025-11-04-2"></script>
+ *    <script type="module" src="/ui-enhance.js?v=2025-11-05-1"></script>
  */
 (() => {
   /********************
@@ -491,12 +491,9 @@
     }
   })();
 
-  console.info("[UI] ui-enhance.js version = 2025-11-04-2");
+  console.info("[UI] ui-enhance.js version = 2025-11-05-1");
   setTimeout(() => {
     console.info("[UI] late-check DOM ready?",
       { btnFetch: !!els.btnFetch, urlInput: !!els.urlInput, tbody: !!els.tbody, API_BASE });
   }, 800);
--})();
--
--}
-+})();
+})();
