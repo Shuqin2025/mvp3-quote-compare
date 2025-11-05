@@ -1,87 +1,90 @@
 <!doctype html>
 <html lang="zh">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>云贸星 · 智能表格生成器</title>
-
-  <!-- 避免 favicon 404 噪声 -->
-  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
-
+  <link rel="icon" href="data:,">
   <style>
     body{background:#fafafa;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
-    .wrap{max-width:980px;margin:0 auto;padding:32px 20px}
+    .wrap{max-width:980px;margin:0 auto;padding:12px 20px}
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     .btn{height:40px;padding:0 14px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer}
-    .btn.primary{background:#2563eb;color:#fff;border-color:#2563eb}
-    .input{min-width:320px;flex:1;height:40px;padding:0 12px;border:1px solid #ddd;border-radius:8px}
-    .card{margin-top:16px;border:1px solid #e5e7eb;border-radius:10px;background:#fff}
-    .card-head{padding:10px 14px;border-bottom:1px solid #eee;color:#666;font-size:14px}
+    .btn-primary{background:#2563eb;color:#fff;border-color:#2563eb}
+    .card{margin-top:12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff}
+    .card-head{padding:10px;border-bottom:1px solid #e5e7eb;background:#f7fafc;font-size:14px}
     .card-body{min-height:420px;overflow:auto;padding:8px}
     table{width:100%;border-collapse:collapse}
     th,td{border:1px solid #eee;padding:6px 8px}
     th{background:#fafafa}
     a{color:#2563eb;text-decoration:none}
-    a:hover{text-decoration:underline}
     .alert{margin-top:12px;border-radius:8px;padding:10px 12px;font-size:14px}
-    .alert.ok{background:#e8f5e9;border:1px solid #c8e6c9;color:#2e7d32}
-    .alert.info{background:#fff8e1;border:1px solid #ffe082;color:#6b5900}
+    .alert.ok{background:#e8f5e9;border:1px solid #2e7d32;color:#2e7d32}
+    .alert.info{background:#fff8e1;border:1px solid #ffeb3b;color:#6b5900}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="row" id="langbar">
-      <button class="btn" data-lang="zh">CN 中文</button>
-      <button class="btn" data-lang="de">DE Deutsch</button>
-      <button class="btn" data-lang="en">GB English</button>
+      <button class="btn">CN 中文</button>
+      <button class="btn">DE Deutsch</button>
+      <button class="btn">GB English</button>
     </div>
 
-    <h1 id="title" style="margin:16px 0 4px;font-size:24px;font-weight:700">云贸星 智能表格生成器</h1>
-    <div id="subtitle" style="color:#6b7280">输入目录型网页链接，秒生成 Excel 产品表格。</div>
+    <h2>云贸星 智能表格生成器</h2>
+    <p>输入目录型网页链接，秒生成 Excel 产品表格。</p>
 
-    <div class="row" style="margin-top:16px">
-      <!-- id 与 ui-enhance.js 保持一致 -->
-      <input id="txtUrl" class="input" placeholder="在此粘贴目录型页面链接（例如某一类目的商品列表页）">
-      <button id="btnFetch" class="btn primary">抓取目录</button>
-      <select id="limit" class="btn"><option>50</option><option>100</option><option>200</option></select>
-      <button id="btnExport" class="btn">导出 Excel（.xlsx）</button>
-      <button id="btnClear" class="btn">清空数据</button>
+    <!-- 抓取 UI -->
+    <div class="row" id="scrape-box">
+      <input id="scrape-url" type="text" placeholder="在此粘贴目录型页面链接（例如某一类目的商品列表）" style="flex:1;height:40px;padding:0 10px;border:1px solid #ddd;border-radius:8px;background:#fff" />
+      <select id="scrape-limit" class="btn" style="height:40px">
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+      </select>
+      <button id="scrape-btn" class="btn btn-primary">抓取目录</button>
+      <button id="export-btn" class="btn">导出 Excel（.xlsx）</button>
+      <button id="clear-btn" class="btn">清空数据</button>
     </div>
 
-    <div id="status" class="alert info">ui_no_data</div>
-    <div id="okbar" class="alert ok" style="display:none"></div>
+    <div class="alert info" id="scrape-result">ui_no_data</div>
 
     <div class="card">
-      <div class="card-head" id="theadNote">—</div>
+      <div class="card-head">—</div>
       <div class="card-body">
-        <table id="tbl">
+        <table id="data-table">
           <thead>
-            <tr>
-              <th>#</th>
-              <th>Item No.</th>
-              <th>Picture</th>
-              <th>Description</th>
-              <th>MOQ</th>
-              <th>Unit Price</th>
-              <th>Link</th>
-            </tr>
+          <tr>
+            <th>#</th>
+            <th>货号</th>
+            <th>图片</th>
+            <th>描述</th>
+            <th>起订量</th>
+            <th>单价</th>
+            <th>链接</th>
+          </tr>
           </thead>
-          <tbody></tbody>
+          <tbody id="tbody"></tbody>
         </table>
       </div>
     </div>
 
-    <div style="margin-top:24px;color:#6b7280;font-size:14px" class="row">
-      <a href="#">支持的网站</a><a href="#">隐私政策</a><a href="#">联系我们</a>
-    </div>
+    <p style="margin-top:24px">
+      <small>支持的网站 · 隐私政策 · 联系我们</small>
+    </p>
   </div>
 
-  <!-- ExcelJS（导出 .xlsx 用） -->
+  <!-- ExcelJS（仅导出用） -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
-  <!-- 从 public 根引用（保持不变） -->
+  <!-- 你的页面逻辑：app-simple.js（如有） -->
   <script type="module" src="/app-simple.js?v=2025-09-16"></script>
-  <script type="module" src="/ui-enhance.js?v=2025-11-05-1"></script>
-  <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
+
+  <!-- 加强脚本：ui-enhance.js（**带版本号**，防缓存；请按你当次版本号替换） -->
+  <script type="module" src="/ui-enhance.js?v=2025-11-05-2"></script>
+
+  <script nomodule>
+    alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');
+  </script>
 </body>
 </html>
