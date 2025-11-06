@@ -215,8 +215,6 @@
         const isPlaceholder = /loader\.svg|logo|placeholder|spacer\.gif/i.test(srcRaw);
 
         imgEl.src = (mustProxy || isPlaceholder) ? proxyUrl : srcRaw;
-        // 主动触发懒加载，提升图像加载成功率
-        if (imgEl.scrollIntoView) try { imgEl.scrollIntoView({ behavior: 'auto', block: 'center' }); } catch(e){}
         imgEl.onerror = () => {
           if (imgEl.src !== proxyUrl) imgEl.src = proxyUrl;
         };
@@ -459,6 +457,3 @@
       { btnFetch: !!els.btnFetch, urlInput: !!els.urlInput, tbody: !!els.tbody, API_BASE });
   }, 800);
 })();
-
-// TODO: handle data-src or <noscript> tags if present in product HTML
-// 可考虑未来提取 Memoryking 等站点中延迟加载的真实图片地址
