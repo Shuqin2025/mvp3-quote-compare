@@ -434,7 +434,7 @@
   if (els.urlInput?.addEventListener) {
     els.urlInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") handleFetchClick(); });
   }
-  if (els.btnExport) { els.btnExport.addEventListener("click", async () => { try { await exportXlsx(); } catch(e){ console.error(e); } }); }
+  if (els.btnExport) { els.btnExport.addEventListener("click", async () => { try { await (window.exportXlsx && window.exportXlsx()); } catch(e){ console.error(e); } }); }
   if (els.btnClear) {
     els.btnClear.addEventListener("click", () => { clearTable(); lastRows = []; setToast("已清空"); });
   }
