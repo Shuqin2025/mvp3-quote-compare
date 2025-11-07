@@ -1,4 +1,3 @@
-// frontend/src/App.jsx
 import React, { useMemo, useState } from 'react';
 import axios from 'axios';
 import ExportButton from './ExportButton';
