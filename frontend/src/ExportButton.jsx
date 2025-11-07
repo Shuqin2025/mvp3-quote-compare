@@ -1,12 +1,28 @@
-import React from 'react';
+import React, { useState } from 'react';
 
-export default function ExportButton({ items, apiBase, toast }) {
+export default function ExportButton({ items = [], apiBase = '', toast = (msg) => alert(msg) }) {
+  const [loading, setLoading] = useState(false);
+
   async function exportExcel() {
-    if (!apiBase) return toast?.('缺少后端 API 地址参数');
-    if (!items || items.length === 0) return toast?.('无数据可导出');
+    if (!apiBase) {
+      toast('❌ 接口地址未配置');
+      return;
+    }
 
-    toast?.('正在导出 Excel 文件...');
+    if (!Array.isArray(items) || items.length === 0) {
+      toast('⚠️ 没有可导出的数据');
+      return;
+    }
+
+    if (loading) {
+      toast('⏳ 正在导出，请稍候...');
+      return;
+    }
+
     try {
+      setLoading(true);
+      toast('📦 正在导出 Excel，请稍候...');
+
       const resp = await fetch(`${apiBase}/v1/api/export-xlsx`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -14,29 +30,42 @@ export default function ExportButton({ items, apiBase, toast }) {
       });
 
       if (!resp.ok) {
-        const txt = await resp.text();
-        console.warn('[Export Error]', txt);
-        throw new Error(`HTTP ${resp.status}`);
+        const errText = await resp.text();
+        throw new Error(`导出失败，状态码 ${resp.status}: ${errText}`);
       }
 
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'export.xlsx';
+      a.download = `export-${new Date().toISOString().slice(0, 10)}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
 
-      toast?.('✅ Excel 导出完成');
+      toast('✅ 导出成功');
     } catch (err) {
       console.error('[Export Error]', err);
-      toast?.('❌ 导出失败，请检查控制台');
+      toast(`❌ 导出失败：${err.message}`);
+    } finally {
+      setLoading(false);
     }
   }
 
   return (
-    <button className="btn primary" onClick={exportExcel}>
-      导出 Excel（.xlsx）
+    <button
+      onClick={exportExcel}
+      disabled={loading}
+      style={{
+        padding: '6px 12px',
+        background: loading ? '#ccc' : '#007bff',
+        color: 'white',
+        border: 'none',
+        borderRadius: 4,
+        cursor: loading ? 'not-allowed' : 'pointer',
+        marginLeft: 12,
+      }}
+    >
+      {loading ? '导出中...' : '导出 Excel (.xlsx)'}
     </button>
   );
 }
