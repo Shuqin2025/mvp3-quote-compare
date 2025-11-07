@@ -112,10 +112,34 @@ export default function App() {
 
   // —— Excel 导出：使用 exceljs，把图片真正嵌入 xlsx —— //
   async function exportExcel() {
-    if (!window.ExcelJS) {
-      alert('ExcelJS 未加载');
+    if (!API_BASE) {
+      alert('缺少 ?api= 后端地址参数，例如：?api=https://<你的-backend>.onrender.com');
       return;
     }
+    try {
+      if (!Array.isArray(list) || list.length === 0) {
+        toastInfo('列表为空，无法导出');
+        return;
+      }
+      const resp = await fetch(`${API_BASE}/v1/api/export-xlsx`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: list, withImages: true }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `catalog-${Date.now()}.xlsx`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toastInfo('导出已开始下载');
+    } catch (e) {
+      console.error('[export-xlsx]', e);
+      toastInfo('导出失败，请稍后再试');
+    }
+  }
+
     const ExcelJS = window.ExcelJS;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('catalog');
