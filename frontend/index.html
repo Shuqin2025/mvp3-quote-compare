@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>云贸星 · 智能表格生成器</title>
 
-  <!-- 避免 favicon 404 噪声 -->
   <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
 
   <style>
@@ -79,21 +78,44 @@
     </div>
   </div>
 
-  <!-- ExcelJS（用于导出 .xlsx） -->
+  <!-- ExcelJS（用于导出 .xlsx，如你的 App 里已内置可移除） -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
-  <!-- 引入前端增强脚本 -->
-  <script type="module" src="/app-simple.js?v=2025-09-16"></script>
-  <script type="module" src="/ui-enhance.js?v=2025-11-07-1"></script>
-
-  <!-- 进行 API_BASE 全局定义 -->
+  <!-- 统一 API 网关地址 -->
   <script>
     window.API_BASE = "https://yunivera-gateway.onrender.com";
   </script>
 
-  <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
+  <!-- 加载主应用与导出逻辑，并显式绑定 exportToXlsx -->
+  <script type="module">
+    import { mountApp } from "/App.jsx";        // 你的前端主入口（按你的项目结构）
+    import { exportToXlsx } from "/export-xlsx.js"; // 负责导出 .xlsx 的模块
 
-  <!-- ✅ 关键：移除 img 的 lazy 属性，确保图片立即加载 -->
+    // 显式暴露给旧代码或按钮 onclick 使用
+    window.exportToXlsx = exportToXlsx;
+
+    // 启动应用（若你的 App 需要目标容器，可在此传参）
+    if (typeof mountApp === "function") {
+      mountApp({
+        tblSelector: "#tbl",
+        statusSelector: "#status",
+        okbarSelector: "#okbar",
+        theadNoteSelector: "#theadNote",
+        limitSelector: "#limit",
+        urlInputSelector: "#txtUrl",
+        fetchBtnSelector: "#btnFetch",
+        exportBtnSelector: "#btnExport",
+        clearBtnSelector: "#btnClear",
+      });
+    }
+  </script>
+
+  <!-- 老浏览器兜底 -->
+  <script nomodule>
+    alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');
+  </script>
+
+  <!-- ✅ 移除 img 的 lazy 属性，确保图片立即加载（兼容旧逻辑） -->
   <script>
     (() => {
       const tbody = document.querySelector('#tbl tbody');
