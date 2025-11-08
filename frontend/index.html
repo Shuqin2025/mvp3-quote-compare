@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>云贸星 · 智能表格生成器</title>
 
+  <!-- 避免 favicon 404 噪声 -->
   <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
 
   <style>
@@ -78,36 +79,46 @@
     </div>
   </div>
 
+  <!-- ExcelJS（用于导出 .xlsx） -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
-  <script type="module" src="/app-simple.js"></script>
-  <script type="module" src="/ui-enhance.js"></script>
+  <!-- 引入前端增强脚本 -->
+  <script type="module" src="/app-simple.js?v=2025-09-16"></script>
+  <script type="module" src="/ui-enhance.js?v=2025-11-07-1"></script>
 
+  <!-- 进行 API_BASE 全局定义 -->
   <script>
     window.API_BASE = "https://yunivera-gateway.onrender.com";
   </script>
 
+  <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
+
+  <!-- ✅ 关键：移除 img 的 lazy 属性，确保图片立即加载 -->
   <script>
     (() => {
       const tbody = document.querySelector('#tbl tbody');
       if (tbody && 'MutationObserver' in window) {
-        const obs = new MutationObserver(list => {
-          list.forEach(m => m.addedNodes.forEach(n => {
-            if (n.tagName === 'TR') {
-              const img = n.querySelector('img');
-              if (img) img.removeAttribute('loading');
+        const observer = new MutationObserver(mutations => {
+          for (const mut of mutations) {
+            for (const node of mut.addedNodes) {
+              if (node.tagName === 'TR') {
+                const img = node.querySelector('img');
+                if (img && img.hasAttribute('loading')) {
+                  img.removeAttribute('loading');
+                }
+              }
             }
-          }));
+          }
         });
-        obs.observe(tbody, { childList: true });
+        observer.observe(tbody, { childList: true });
       }
     })();
   </script>
 
-<script type="module">
-  import { exportToXlsx } from './export-xlsx.js';
-  window.exportToXlsx = exportToXlsx;
-</script>
-
+  <!-- 在 HTML 中暴露导出函数（与 export-xlsx.js 配套） -->
+  <script type="module">
+    import { exportToXlsx } from './export-xlsx.js';
+    window.exportToXlsx = exportToXlsx;
+  </script>
 </body>
 </html>
