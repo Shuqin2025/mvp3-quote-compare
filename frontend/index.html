@@ -115,7 +115,7 @@
     })();
   </script>
 
-  <!-- 在 HTML 中暴露导出函数（与 export-xlsx.js 配套） -->
+  <!-- ✅ 暴露导出函数给按钮 -->
   <script type="module">
     import { exportToXlsx } from './export-xlsx.js';
     window.exportToXlsx = exportToXlsx;
