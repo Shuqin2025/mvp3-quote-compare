@@ -30,6 +30,63 @@
   const API_BASE = getApiBase();
   console.info("[UI] API_BASE =", API_BASE);
 
+  // ---------- base64 helpers ----------
+  const isDataUri = (s) => /^data:image\/[a-z0-9+.-]+;base64,/i.test(String(s||""));
+  async function blobToBase64(blob) {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result || ""));
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+  async function fetchImageAsBase64Direct(url) {
+    const r = await fetch(url, { mode: "cors", credentials: "omit" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const blob = await r.blob();
+    return await blobToBase64(blob);
+  }
+  async function fetchImageAsBase64ViaApi(url) {
+    if (!API_BASE) throw new Error("no API_BASE");
+    const api = `${API_BASE}/v1/api/image?format=base64&url=${encodeURIComponent(url)}`;
+    const r = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if (j && j.ok && j.base64) {
+      if (/^data:/i.test(j.base64)) return j.base64;
+      const ct = j.contentType || "image/jpeg";
+      return `data:${ct};base64,${j.base64}`;
+    }
+    if (j && typeof j === "string" && /^data:/i.test(j)) return j;
+    throw new Error("invalid image api response");
+  }
+  async function ensureBase64ForRowImage(row) {
+    const img = pickImgClient(row) || row.img || "";
+    if (!img) return row;
+    if (isDataUri(img)) return row;
+    let dataUrl = "";
+    try { dataUrl = await fetchImageAsBase64ViaApi(img); }
+    catch { try { dataUrl = await fetchImageAsBase64Direct(img); } catch {} }
+    const patched = { ...row };
+    if (dataUrl) {
+      patched.image = dataUrl;
+      patched.img = dataUrl;
+      patched.picture = dataUrl;
+    }
+    return patched;
+  }
+  async function prepareRowsWithBase64(rows, max = 200) {
+    const slice = Array.isArray(rows) ? rows.slice(0, max) : [];
+    const rest  = Array.isArray(rows) ? rows.slice(max) : [];
+    const done = [];
+    for (let i = 0; i < slice.length; i++) {
+      try { done.push(await ensureBase64ForRowImage(slice[i])); }
+      catch { done.push(slice[i]); }
+    }
+    return done.concat(rest);
+  }
+
+
   const els = {
     urlInput:
       $("#txtUrl") ||
@@ -434,7 +491,26 @@
   if (els.urlInput?.addEventListener) {
     els.urlInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") handleFetchClick(); });
   }
-  if (els.btnExport) { els.btnExport.addEventListener("click", async () => { try { await (window.exportXlsx && window.exportXlsx()); } catch(e){ console.error(e); } }); }
+  
+  if (els.btnExport) {
+    els.btnExport.addEventListener("click", async () => {
+      try {
+        if (!lastRows?.length) { setToast("没有可以导出的数据", false); return; }
+        setToast("正在准备图片（base64）…", true);
+        const prepped = await prepareRowsWithBase64(lastRows, 200);
+        window.__rowsForExport = prepped;
+        if (typeof window.exportXlsx === "function") {
+          if (window.exportXlsx.length >= 1) { await window.exportXlsx(prepped); }
+          else { await window.exportXlsx(); }
+        } else {
+          console.error("export-xlsx.js not loaded");
+          alert("导出模块未加载");
+        }
+        setToast("正在导出，请稍候…", true);
+      } catch(e){ console.error(e); setToast("导出失败", false); }
+    });
+  }
+catch(e){ console.error(e); } }); }
   if (els.btnClear) {
     els.btnClear.addEventListener("click", () => { clearTable(); lastRows = []; setToast("已清空"); });
   }
