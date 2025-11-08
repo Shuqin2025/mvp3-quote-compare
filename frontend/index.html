@@ -93,7 +93,7 @@
 
   <script nomodule>alert('您的浏览器过旧，无法运行该页面，请升级到现代浏览器。');</script>
 
-  <!-- 新增：监听表格行插入，去除 img 的 lazy 属性，确保图片正常加载 -->
+  <!-- ✅ 关键：移除 img 的 lazy 属性，确保图片立即加载 -->
   <script>
     (() => {
       const tbody = document.querySelector('#tbl tbody');
