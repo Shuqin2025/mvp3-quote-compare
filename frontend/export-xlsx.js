@@ -10,10 +10,15 @@
  */
 export async function exportToXlsxByUrl(listUrl, limit = 50) {
   if (!listUrl) throw new Error("缺少目录链接");
-  const base = (window.API_BASE || "").replace(/\/+$/,"");
+  const base = (window.API_BASE || "").replace(/\/+$/, ""); // 可为空：则用相对路径
   const url = `${base}/v1/api/export-xlsx?url=${encodeURIComponent(listUrl)}&limit=${encodeURIComponent(limit)}`;
+
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`导出失败：HTTP ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`导出失败：HTTP ${res.status} ${res.statusText} ${text}`);
+  }
+
   const blob = await res.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -32,15 +37,23 @@ export async function exportToXlsxByUrl(listUrl, limit = 50) {
  * @param {boolean} withImages
  */
 export async function exportToXlsx(items = [], withImages = true) {
-  if (!Array.isArray(items) || items.length === 0) throw new Error("没有可导出的数据");
-  const base = (window.API_BASE || "").replace(/\/+$/,"");
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("没有可导出的数据");
+  }
+  const base = (window.API_BASE || "").replace(/\/+$/, "");
   const url = `${base}/v1/api/export-xlsx`;
+
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items, withImages })
+    body: JSON.stringify({ items, withImages }),
   });
-  if (!res.ok) throw new Error(`导出失败：HTTP ${res.status}`);
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`导出失败：HTTP ${res.status} ${res.statusText} ${text}`);
+  }
+
   const blob = await res.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
