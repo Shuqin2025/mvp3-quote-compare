@@ -1,73 +1,103 @@
-// export-xlsx.js
-// 前端导出：支持两种来源
-// A) 直接传列表页 URL：GET /v1/api/export-xlsx?url=...&limit=...
-// B) 传入已在前端表格里的 items：POST /v1/api/export-xlsx（可选 withImages）
+// frontend/export-xlsx.js  — unified caller for the gateway
+// Exposes two helpers and also binds them to window for plain <script> usage:
+//   - exportToXlsx(items, {withImages, filename})
+//   - exportToXlsxByUrl(url, {limit, withImages, filename})
+//
+// Why this file?
+// - Your backend routes live under /v1/api/* (e.g. /v1/api/export-xlsx).
+//   The previous JS pointed at /v1/export-xlsx, which produced "Cannot GET /v1/export-xlsx".
+// - This version always talks to /v1/api/export-xlsx and works with BOTH
+//   POST (items array) and GET (?url=...&limit=...).
 
-/**
- * 方式一：给目录页 URL，后端自行抓取并写入图片到 .xlsx
- * @param {string} listUrl
- * @param {number} limit
- */
-export async function exportToXlsxByUrl(listUrl, limit = 50) {
-  if (!listUrl) throw new Error("缺少目录链接");
-  const base = (window.API_BASE || "").replace(/\/+$/, ""); // 可为空：则用相对路径
-  const url = `${base}/v1/api/export-xlsx?url=${encodeURIComponent(listUrl)}&limit=${encodeURIComponent(limit)}`;
+function getApiBase () {
+  // Priority 1: <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api">
+  const meta = (typeof document !== 'undefined')
+    ? document.querySelector('meta[name="api-base"]')
+    : null;
+  if (meta?.content) return meta.content.replace(/\/+$/,'');
 
-  const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`导出失败：HTTP ${res.status} ${res.statusText} ${text}`);
+  // Priority 2: window.API_BASE or VITE_API_BASE (for vite)
+  const env = (typeof window !== 'undefined' && window.API_BASE)
+           || (typeof import !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE);
+  if (env) return String(env).replace(/\/+$/,'');
+
+  // Fallback: same origin + /v1/api
+  if (typeof location !== 'undefined' && location.origin) {
+    return location.origin.replace(/\/+$/,'') + '/v1/api';
   }
+  return '/v1/api';
+}
 
-  const blob = await res.blob();
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "export.xlsx";
+function safeFilename(name, def = 'products.xlsx') {
+  const n = String(name || '').trim();
+  if (!n) return def;
+  return n.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ');
+}
+
+function triggerDownload(blob, filename = 'products.xlsx') {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = safeFilename(filename);
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 0);
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 /**
- * 方式二：传已在前端渲染的 items（含 img 时可让后端代抓并写入）
- * @param {Array<object>} items
- * @param {boolean} withImages
+ * Export already-parsed items (array of { sku,title,url,img,desc,moq,price })
+ * via POST -> /v1/api/export-xlsx
  */
-export async function exportToXlsx(items = [], withImages = true) {
+export async function exportToXlsx(items, opts = {}) {
+  const api = getApiBase();
+  const { withImages = true, filename = '产品数据.xlsx' } = opts;
   if (!Array.isArray(items) || items.length === 0) {
-    throw new Error("没有可导出的数据");
+    throw new Error('没有可导出的数据');
   }
-  const base = (window.API_BASE || "").replace(/\/+$/, "");
-  const url = `${base}/v1/api/export-xlsx`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items, withImages }),
+  const res = await fetch(`${api}/export-xlsx`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, withImages })
   });
-
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`导出失败：HTTP ${res.status} ${res.statusText} ${text}`);
+    const text = await res.text().catch(() => '');
+    throw new Error(`导出失败 (${res.status}) ${text}`);
   }
-
   const blob = await res.blob();
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "export.xlsx";
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 0);
+  triggerDownload(blob, filename);
+  return true;
 }
 
-// 可选：也暴露到 window，便于控制台/行内 onclick 调用
-if (typeof window !== "undefined") {
+/**
+ * Export by giving a catalog URL.
+ * GET -> /v1/api/export-xlsx?url=...&limit=50&withImages=true
+ */
+export async function exportToXlsxByUrl(url, opts = {}) {
+  const api = getApiBase();
+  const { limit = 50, withImages = true, filename = '产品数据.xlsx' } = opts;
+  if (!url || typeof url !== 'string') throw new Error('缺少目录链接 url');
+  const qs = new URLSearchParams({
+    url,
+    limit: String(limit),
+    withImages: String(withImages)
+  });
+  const res = await fetch(`${api}/export-xlsx?${qs.toString()}`, {
+    method: 'GET'
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`导出失败 (${res.status}) ${text}`);
+  }
+  const blob = await res.blob();
+  triggerDownload(blob, filename);
+  return true;
+}
+
+// Bind to window for <script> usage
+if (typeof window !== 'undefined') {
   window.exportToXlsx = exportToXlsx;
   window.exportToXlsxByUrl = exportToXlsxByUrl;
 }
+
+export default { exportToXlsx, exportToXlsxByUrl };
