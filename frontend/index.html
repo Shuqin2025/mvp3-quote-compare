@@ -74,11 +74,8 @@
     </div>
   </div>
 
-  <!-- ExcelJS（用于导出 .xlsx） -->
-  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
-
   <script>
-    // 🔧 网关根：你当前使用 Render gateway
+    // ✅ 指向你的 Render 网关（后端 server 已兼容 /v1/api 与 /v1 别名）
     window.API_BASE = "https://yunivera-gateway.onrender.com";
 
     const $ = sel => document.querySelector(sel);
@@ -132,7 +129,7 @@
       }
     }
 
-    // 简单版导出（走后端 /v1/export-xlsx 别名，已在 server.js 里兼容）
+    // 简单 GET 下载（后端已提供 /v1/export-xlsx 别名）
     async function exportToXlsx() {
       try {
         const url = $('#txtUrl').value.trim();
@@ -144,7 +141,7 @@
         console.log('[GET]', api);
         const a = document.createElement('a');
         a.href = api;
-        a.download = 'export.xlsx';
+        a.download = 'catalog.xlsx';
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -161,7 +158,7 @@
     $('#btnExport').addEventListener('click', exportToXlsx);
     $('#btnClear').addEventListener('click', () => { tbody.innerHTML = ''; setStatus('已清空'); });
 
-    // ✅ 关键：移除 img 的 lazy 属性，确保图片立即加载
+    // 去除新增行里图片的 lazy 属性，避免预览看不到图
     (() => {
       if (tbody && 'MutationObserver' in window) {
         const observer = new MutationObserver(muts => {
