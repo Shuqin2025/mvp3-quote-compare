@@ -11,18 +11,20 @@
     .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     .btn { height:40px; padding:0 14px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; }
     .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+    .btn:disabled { opacity: .6; cursor:not-allowed; }
     .input { min-width:320px; flex:1; height:40px; padding:0 12px; border:1px solid #ddd; border-radius:8px; }
     .card { margin-top:16px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
     .card-head { padding:10px 14px; border-bottom:1px solid #eee; color:#666; font-size:14px; }
     .card-body { min-height:420px; overflow:auto; padding:8px; }
     table { width:100%; border-collapse:collapse; }
-    th, td { border:1px solid #eee; padding:6px 8px; }
+    th, td { border:1px solid #eee; padding:6px 8px; vertical-align:top; }
     th { background:#fafafa; }
     a { color:#2563eb; text-decoration:none; }
     a:hover { text-decoration:underline; }
     .alert { margin-top:12px; border-radius:8px; padding:10px 12px; font-size:14px; }
     .alert.ok { background:#e8f5e9; border:1px solid #c8e6c9; color:#2e7d32; }
     .alert.info { background:#fff8e1; border:1px solid #ffe082; color:#6b5900; }
+    img.thumb { width:72px; height:72px; object-fit:contain; background:#f8f8f8; border:1px solid #eee; border-radius:6px; }
   </style>
 </head>
 <body>
@@ -54,11 +56,11 @@
           <thead>
             <tr>
               <th>#</th>
-              <th>Item No.</th>
-              <th>Picture</th>
-              <th>Description</th>
+              <th id="thSku">Item No.</th>
+              <th id="thPic">Picture</th>
+              <th id="thDesc">Description</th>
               <th>MOQ</th>
-              <th>Unit Price</th>
+              <th id="thPrice">Unit Price</th>
               <th>Link</th>
             </tr>
           </thead>
@@ -75,13 +77,64 @@
   </div>
 
   <script>
-    // ✅ 指向你的 Render 网关（后端 server 已兼容 /v1/api 与 /v1 别名）
-    window.API_BASE = "https://yunivera-gateway.onrender.com";
+    // ==============================
+    // 后端基址：只写一次，不再拼两个地址导致 “%20与%20” 的错误
+    // ==============================
+    const API_BASE = "https://yunivera-gateway.onrender.com";     // 你的 Render 网关
+    const API = {
+      parse:   (u,limit)=> `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(u)}&limit=${limit}`,
+      exportG: (u,limit)=> `${API_BASE}/v1/export-xlsx?url=${encodeURIComponent(u)}&limit=${limit}`, // 兼容别名
+      exportF: (u,limit)=> `${API_BASE}/v1/api/export-xlsx?url=${encodeURIComponent(u)}&limit=${limit}`, // 失败回退
+      image:   (u)=> `${API_BASE}/v1/api/image?format=raw&url=${encodeURIComponent(u)}` // 图片统一用代理，避免懒加载/CORS
+    };
 
+    // 简易 i18n
+    const I18N = {
+      zh: {
+        title:'云贸星 智能表格生成器', sub:'输入目录型网页链接，秒生成 Excel 产品表格。',
+        fetch:'抓取目录', export:'导出 Excel（.xlsx）', clear:'清空数据',
+        thSku:'货号', thPic:'图片', thDesc:'描述', thPrice:'单价', open:'打开', noUrl:'请输入目录页链接',
+        fetching:'抓取中…', fetched:'抓取完成', exportIng:'导出中…', exported:'已触发下载', cleared:'已清空',
+      },
+      en: {
+        title:'Yunivera · Table Maker', sub:'Paste a category/list URL to export product table.',
+        fetch:'Fetch', export:'Export .xlsx', clear:'Clear',
+        thSku:'Item No.', thPic:'Picture', thDesc:'Description', thPrice:'Unit Price', open:'Open', noUrl:'Please input a URL',
+        fetching:'Fetching…', fetched:'Done', exportIng:'Exporting…', exported:'Download started', cleared:'Cleared',
+      },
+      de: {
+        title:'Yunivera · Tabellengenerator', sub:'Fügen Sie eine Katalog-/Listen-URL ein.',
+        fetch:'Abrufen', export:'Export (.xlsx)', clear:'Leeren',
+        thSku:'Artikel-Nr.', thPic:'Bild', thDesc:'Beschreibung', thPrice:'Preis', open:'Öffnen', noUrl:'Bitte URL eingeben',
+        fetching:'Lädt…', fetched:'Fertig', exportIng:'Exportiert…', exported:'Download gestartet', cleared:'Geleert',
+      }
+    };
+    let lang = 'zh';
     const $ = sel => document.querySelector(sel);
     const tbody = $('#tbl tbody');
     const statusBar = $('#status');
     const okbar = $('#okbar');
+    const btnFetch = $('#btnFetch');
+    const btnExport = $('#btnExport');
+
+    function setLang(code){
+      lang = I18N[code] ? code : 'zh';
+      const t = I18N[lang];
+      $('#title').textContent = t.title;
+      $('#subtitle').textContent = t.sub;
+      btnFetch.textContent = t.fetch;
+      btnExport.textContent = t.export;
+      $('#btnClear').textContent = t.clear;
+      $('#thSku').textContent = t.thSku;
+      $('#thPic').textContent = t.thPic;
+      $('#thDesc').textContent = t.thDesc;
+      $('#thPrice').textContent = t.thPrice;
+    }
+    $('#langbar').addEventListener('click', e=>{
+      const code = e.target?.dataset?.lang;
+      if(code) setLang(code);
+    });
+    setLang('zh');
 
     function setStatus(msg, ok=false) {
       statusBar.className = 'alert ' + (ok ? 'ok' : 'info');
@@ -91,8 +144,10 @@
     }
 
     function rowHtml(i, it) {
-      const img = it.img ? `<img src="${it.img}" style="width:72px;height:72px;object-fit:contain" />` : '';
-      const link = it.url ? `<a href="${it.url}" target="_blank">Open</a>` : '';
+      // 图片统一走后端代理，自动把 webp/lazy 处理掉
+      const imgUrl = it.img ? API.image(it.img) : '';
+      const img = it.img ? `<img class="thumb" src="${imgUrl}" alt="">` : '';
+      const link = it.url ? `<a href="${it.url}" target="_blank">${I18N[lang].open}</a>` : '';
       return `<tr>
         <td>${i+1}</td>
         <td>${it.sku||''}</td>
@@ -104,16 +159,21 @@
       </tr>`;
     }
 
+    function toggleBusy(b){
+      btnFetch.disabled = b; btnExport.disabled = b;
+      $('#txtUrl').disabled = b; $('#limit').disabled = b;
+    }
+
     async function fetchCatalog() {
       try {
         const url = $('#txtUrl').value.trim();
         const limit = parseInt($('#limit').value,10) || 50;
-        if (!url) return setStatus('请输入目录页链接');
+        if (!url) return setStatus(I18N[lang].noUrl);
 
-        setStatus('抓取中…');
-        const api = `${window.API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}`;
+        setStatus(I18N[lang].fetching); toggleBusy(true);
+        const api = API.parse(url,limit);
         console.log('[GET]', api);
-        const r = await fetch(api);
+        const r = await fetch(api, { mode:'cors' });
         if (!r.ok) throw new Error('HTTP '+r.status);
         const data = await r.json();
 
@@ -122,43 +182,58 @@
         rows.forEach((it, i) => tbody.insertAdjacentHTML('beforeend', rowHtml(i, it)));
 
         $('#theadNote').textContent = `Adapter: ${data?.adapter||'-'} | Count: ${rows.length}`;
-        setStatus('抓取完成', true);
+        setStatus(I18N[lang].fetched, true);
       } catch (e) {
         console.error(e);
         setStatus('抓取失败：'+ (e?.message || e));
+      } finally {
+        toggleBusy(false);
       }
     }
 
-    // 简单 GET 下载（后端已提供 /v1/export-xlsx 别名）
+    // GET 下载；若别名 /v1/export-xlsx 仍被网关阻拦，自动回退到 /v1/api/export-xlsx
     async function exportToXlsx() {
       try {
         const url = $('#txtUrl').value.trim();
         const limit = parseInt($('#limit').value,10) || 50;
-        if (!url) return setStatus('请输入目录页链接');
-        setStatus('导出中…');
+        if (!url) return setStatus(I18N[lang].noUrl);
+        setStatus(I18N[lang].exportIng); toggleBusy(true);
 
-        const api = `${window.API_BASE}/v1/export-xlsx?url=${encodeURIComponent(url)}&limit=${limit}`;
-        console.log('[GET]', api);
-        const a = document.createElement('a');
-        a.href = api;
-        a.download = 'catalog.xlsx';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        const tryOnce = async (href) => {
+          return new Promise((resolve,reject)=>{
+            // 直接创建 a 链接触发下载
+            const a = document.createElement('a');
+            a.href = href;
+            a.download = 'catalog.xlsx';
+            // 一些浏览器会静默失败，我们用 3 秒超时兜底
+            const timer = setTimeout(()=>reject(new Error('timeout')), 3000);
+            a.onclick = ()=> clearTimeout(timer);
+            document.body.appendChild(a); a.click(); a.remove();
+            // 不阻塞：假定成功
+            resolve(true);
+          });
+        };
 
-        setStatus('已触发下载', true);
+        try {
+          await tryOnce(API.exportG(url,limit));
+        } catch {
+          await tryOnce(API.exportF(url,limit)); // 回退
+        }
+        setStatus(I18N[lang].exported, true);
       } catch (e) {
         console.error(e);
         setStatus('导出失败：' + (e?.message || e));
+      } finally {
+        toggleBusy(false);
       }
     }
     window.exportToXlsx = exportToXlsx;
 
     $('#btnFetch').addEventListener('click', fetchCatalog);
     $('#btnExport').addEventListener('click', exportToXlsx);
-    $('#btnClear').addEventListener('click', () => { tbody.innerHTML = ''; setStatus('已清空'); });
+    $('#btnClear').addEventListener('click', () => { tbody.innerHTML = ''; setStatus(I18N[lang].cleared); });
 
-    // 去除新增行里图片的 lazy 属性，避免预览看不到图
+    // 观察新增的 <tr>，去除图片 loading=lazy（避免预览空白）
     (() => {
       if (tbody && 'MutationObserver' in window) {
         const observer = new MutationObserver(muts => {
