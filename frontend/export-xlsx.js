@@ -10,22 +10,33 @@
 //   POST (items array) and GET (?url=...&limit=...).
 
 function getApiBase () {
-  // Priority 1: <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api">
-  const meta = (typeof document !== 'undefined')
-    ? document.querySelector('meta[name="api-base"]')
-    : null;
-  if (meta?.content) return meta.content.replace(/\/+$/,'');
+  try {
+    // Priority 1: URL param ?api=...
+    const u = new URL(typeof location !== 'undefined' ? location.href : 'http://local');
+    const qApi = u.searchParams.get('api');
 
-  // Priority 2: window.API_BASE or VITE_API_BASE (for vite)
-  const env = (typeof window !== 'undefined' && window.API_BASE)
-           || (typeof import !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE);
-  if (env) return String(env).replace(/\/+$/,'');
+    // Priority 2: <meta name="api-base">
+    const meta = (typeof document !== 'undefined')
+      ? document.querySelector('meta[name="api-base"]')
+      : null;
+    const mApi = meta?.content;
 
-  // Fallback: same origin + /v1/api
-  if (typeof location !== 'undefined' && location.origin) {
-    return location.origin.replace(/\/+$/,'') + '/v1/api';
+    // Priority 3: window.API_BASE or Vite env
+    const env = (typeof window !== 'undefined' && window.API_BASE)
+             || (typeof import !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE);
+
+    // Priority 4: same-origin fallback '/v1/api'
+    const fallback = (typeof location !== 'undefined' && location.origin)
+      ? location.origin.replace(/\/+$/,'') + '/v1/api'
+      : '/v1/api';
+
+    const base = (qApi || mApi || env || fallback);
+    return String(base).replace(/\/+$/,'');
+  } catch {
+    return '/v1/api';
   }
-  return '/v1/api';
+}
+return '/v1/api';
 }
 
 function safeFilename(name, def = 'products.xlsx') {
