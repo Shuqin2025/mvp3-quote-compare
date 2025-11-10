@@ -30,6 +30,11 @@
   const API_BASE = (()=>{try{const u=new URL(location.href);const api=u.searchParams.get('api');const meta=document.querySelector('meta[name="api-base"]')?.content||'';const base=(api||meta||'/v1/api');return String(base).replace(/\/+$/,'');}catch{ return '/v1/api'; }})();
   console.info("[UI] API_BASE =", API_BASE);
 
+  // Unified image proxy helper
+  function imageProxy(u, format='raw') {
+    return `${API_BASE}/image?format=${format}&url=${encodeURIComponent(u)}`;
+  }
+
   // ---------- base64 helpers ----------
   const isDataUri = (s) => /^data:image\/[a-z0-9+.-]+;base64,/i.test(String(s||""));
   async function blobToBase64(blob) {
@@ -48,7 +53,7 @@
   }
   async function fetchImageAsBase64ViaApi(url) {
     if (!API_BASE) throw new Error("no API_BASE");
-    const api = `${API_BASE}/image?format=base64&url=${encodeURIComponent(url)}`;
+    const api = `${imageProxy(url,'base64')}`;
     const r = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
@@ -266,7 +271,7 @@
 
         const mustProxy = /(^|\.)memoryking\.de$/.test(srcHost);
         const proxyUrl = API_BASE
-          ? `${API_BASE}/image?format=raw&url=${encodeURIComponent(srcRaw)}`
+          ? `${imageProxy(srcRaw)}`
           : srcRaw;
 
         const isPlaceholder = /loader\.svg|logo|placeholder|spacer\.gif/i.test(srcRaw);
@@ -389,7 +394,7 @@
         const imgUrl = r?.img ? String(r.img) : "";
         if (!imgUrl || !API_BASE) continue;
         try {
-          const api = `${API_BASE}/image?format=base64&url=${encodeURIComponent(imgUrl)}`;
+          const api = `${imageProxy(imgUrl,'base64')}`;
           const resp = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
           const j = await resp.json();
           if (!(j && j.ok && j.base64)) continue;
@@ -533,3 +538,4 @@ catch(e){ console.error(e); } }); }
       { btnFetch: !!els.btnFetch, urlInput: !!els.urlInput, tbody: !!els.tbody, API_BASE });
   }, 800);
 })();
+
