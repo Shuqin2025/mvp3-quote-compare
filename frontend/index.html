@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 你可按需改成 /v1/api 或完整网关；页面脚本会优先读取 ?api= 覆盖 -->
+  <!-- 可用 ?api= 覆盖；否则读此 meta；再否则回退 /v1/api -->
   <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api" />
   <title>云贸星 · 智能表格生成器</title>
   <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
@@ -13,16 +13,14 @@
     .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     .btn { height:40px; padding:0 14px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; }
     .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
-    .btn:disabled { opacity: .6; cursor:not-allowed; }
+    .btn:disabled { opacity:.6; cursor:not-allowed; }
     .input { min-width:320px; flex:1; height:40px; padding:0 12px; border:1px solid #ddd; border-radius:8px; }
     .card { margin-top:16px; border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; }
-    .card-head { padding: 14px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; gap:12px; }
-    .card-body { min-height:420px; overflow:auto; padding: 16px; }
+    .card-head { padding:14px; border-bottom:1px solid #e5e7eb; display:flex; gap:12px; align-items:center; }
+    .card-body { min-height:420px; overflow:auto; padding:16px; }
     table { width:100%; border-collapse:collapse; }
-    th, td { border:1px solid #eee; padding: 8px; vertical-align:top; }
+    th, td { border:1px solid #eee; padding:8px; vertical-align:top; }
     th { background:#fafafa; }
-    a { color:#2563eb; text-decoration:none; }
-    a:hover { text-decoration:underline; }
     .alert { margin-top:12px; border-radius:8px; padding:10px 12px; }
     .alert.ok { background:#e8f5e9; border:1px solid #c8e6c9; color:#2e7d32; }
     .alert.info { background:#fff8e1; border:1px solid #ffecb3; color:#8d6e63; }
@@ -31,15 +29,6 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="row" id="langbar">
-      <button class="btn" onclick="setLang('zh')">中文</button>
-      <button class="btn" onclick="setLang('en')">English</button>
-      <button class="btn" onclick="setLang('de')">Deutsch</button>
-    </div>
-
-    <h1 id="title" style="margin:16px 0 8px; font-weight:600">云贸星 智能表格生成器</h1>
-    <div style="color:#6b7280" id="subtitle">输入目录型网页链接，秒生成 Excel 产品表格。</div>
-
     <div class="card">
       <div class="card-head">
         <input id="txtUrl" class="input" placeholder="https://example.com/category/..." />
@@ -53,183 +42,15 @@
         <div id="okbar" class="alert ok" style="display:none;"></div>
         <table id="tbl">
           <thead>
-            <tr>
-              <th>#</th><th>货号</th><th>图片</th><th>描述</th><th>单价</th><th>打开</th>
-            </tr>
+            <tr><th>#</th><th>货号</th><th>图片</th><th>描述</th><th>单价</th><th>打开</th></tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
     </div>
-
-    <div class="row" style="margin-top:24px; color:#6b7280; font-size:14px">
-      <a href="#">支持的网站</a>
-      <a href="#">隐私政策</a>
-      <a href="#">联系我们</a>
-    </div>
   </div>
 
-  <script>
-    // 统一 API 前缀：优先 ?api= 覆盖，再读 <meta name="api-base">，最后回退 '/v1/api'
-    (function ensureApiBase(){
-      const meta = document.querySelector('meta[name="api-base"]');
-      const qsApi = new URLSearchParams(location.search).get('api');
-      if (qsApi) meta?.setAttribute('content', qsApi);
-    })();
-
-    const API_BASE = document.querySelector('meta[name="api-base"]')?.content || '/v1/api';
-
-    // 统一的图片代理：默认 raw，需要 base64 时传 'base64'
-    function imageProxy(u, format = 'raw') {
-      return `${API_BASE}/image?format=${format}&url=${encodeURIComponent(u)}`;
-    }
-
-    const API = {
-      parse:   (u,limit)=> `${API_BASE}/catalog/parse?url=${encodeURIComponent(u)}&limit=${limit}`,
-      export:  (u,limit)=> `${API_BASE}/export-xlsx?url=${encodeURIComponent(u)}&limit=${limit}`
-    };
-
-    // 简易 i18n
-    const I18N = {
-      zh: {
-        title:'云贸星 智能表格生成器', sub:'输入目录型网页链接，秒生成 Excel 产品表格。',
-        fetch:'抓取目录', export:'导出 .xlsx', clear:'清空数据',
-        thSku:'货号', thPic:'图片', thDesc:'描述', thPrice:'单价', open:'打开', noUrl:'请输入目录页链接',
-        fetching:'抓取中…', fetched:'抓取完成', exportIng:'导出中…', exported:'已触发下载', cleared:'已清空',
-      },
-      en: {
-        title:'Yunivera · Table Maker', sub:'Paste a category/list URL to export product table.',
-        fetch:'Fetch', export:'Export .xlsx', clear:'Clear',
-        thSku:'Item No.', thPic:'Picture', thDesc:'Description', thPrice:'Unit Price', open:'Open', noUrl:'Please input a URL',
-        fetching:'Fetching…', fetched:'Done', exportIng:'Exporting…', exported:'Download started', cleared:'Cleared',
-      },
-      de: {
-        title:'Yunivera · Tabellengenerator',
-        sub:'Fügen Sie eine Katalog-/Listen-URL ein.',
-        fetch:'Abrufen', export:'Export (.xlsx)', clear:'Leeren',
-        thSku:'Artikel-Nr.', thPic:'Bild', thDesc:'Beschreibung', thPrice:'Preis', open:'Öffnen', noUrl:'Bitte URL eingeben',
-        fetching:'Lädt…', fetched:'Fertig', exportIng:'Exportiert…', exported:'Download gestartet', cleared:'Geleert',
-      }
-    };
-    let lang = 'zh';
-    const $ = sel => document.querySelector(sel);
-    const tbody = $('#tbl tbody');
-    const statusBar = $('#status');
-    const okbar = $('#okbar');
-    const btnFetch = $('#btnFetch');
-    const btnExport = $('#btnExport');
-
-    function setLang(code){
-      lang = I18N[code] ? code : 'zh';
-      $('#title').textContent = I18N[lang].title;
-      $('#subtitle').textContent = I18N[lang].sub;
-      btnFetch.textContent = I18N[lang].fetch;
-      btnExport.textContent = I18N[lang].export;
-      $('#btnClear').textContent = I18N[lang].clear;
-      const ths = document.querySelectorAll('#tbl thead th');
-      ths[1].textContent = I18N[lang].thSku;
-      ths[2].textContent = I18N[lang].thPic;
-      ths[3].textContent = I18N[lang].thDesc;
-      ths[4].textContent = I18N[lang].thPrice;
-    }
-    setLang('zh');
-
-    function toggleBusy(busy){
-      [btnFetch, btnExport, $('#btnClear'), $('#txtUrl'), $('#limit')].forEach(el=> el.disabled = !!busy);
-      document.body.style.cursor = busy ? 'progress' : 'default';
-    }
-    function setStatus(text, ok=false){
-      statusBar.textContent = text;
-      okbar.style.display = ok ? 'block' : 'none';
-      if (ok) okbar.textContent = text;
-    }
-
-    // 抓取目录
-    async function fetchCatalog(){
-      try {
-        const url = $('#txtUrl').value.trim();
-        const limit = parseInt($('#limit').value,10) || 50;
-        if (!url) return setStatus(I18N[lang].noUrl);
-        setStatus(I18N[lang].fetching); toggleBusy(true);
-
-        const api = API.parse(url,limit);
-        const r = await fetch(api, { mode:'cors' });
-        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-        const data = await r.json();
-
-        // 渲染
-        tbody.innerHTML = '';
-        for (let i=0; i<data.length; i++){
-          const it = data[i];
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>${i+1}</td>
-            <td>${it.sku || ''}</td>
-            <td>${it.img ? `<img class="thumb" src="${imageProxy(it.img)}" alt="" />` : ''}</td>
-            <td>${it.desc || ''}</td>
-            <td>${it.price || ''}</td>
-            <td>${it.href ? `<a href="${it.href}" target="_blank">${I18N[lang].open}</a>` : ''}</td>
-          `;
-          tbody.appendChild(tr);
-        }
-
-        setStatus(I18N[lang].fetched, true);
-      } catch (e) {
-        console.error(e);
-        setStatus('抓取失败：'+ (e?.message || e));
-      } finally {
-        toggleBusy(false);
-      }
-    }
-
-    // GET 下载：统一走 `${API_BASE}/export-xlsx`
-    async function exportToXlsx() {
-      try {
-        const url = $('#txtUrl').value.trim();
-        const limit = parseInt($('#limit').value,10) || 50;
-        if (!url) return setStatus(I18N[lang].noUrl);
-        setStatus(I18N[lang].exportIng); toggleBusy(true);
-
-        const tryOnce = async (href) => {
-          return new Promise((resolve,reject)=>{
-            const a = document.createElement('a');
-            a.href = href;
-            a.download = 'catalog.xlsx';
-            const timer = setTimeout(()=>reject(new Error('timeout')), 3000);
-            a.onclick = ()=> clearTimeout(timer);
-            document.body.appendChild(a); a.click(); a.remove();
-            resolve(true);
-          });
-        };
-
-        await tryOnce(API.export(url,limit));
-        setStatus(I18N[lang].exported, true);
-      } catch (e) {
-        console.error(e);
-        setStatus('导出失败：' + (e?.message || e));
-      } finally {
-        toggleBusy(false);
-      }
-    }
-    window.exportToXlsx = exportToXlsx;
-
-    $('#btnFetch').addEventListener('click', fetchCatalog);
-    $('#btnExport').addEventListener('click', exportToXlsx);
-    $('#btnClear').addEventListener('click', () => { tbody.innerHTML = ''; setStatus(I18N[lang].cleared); });
-
-    // 观察新增的 <tr>，去除图片 loading=lazy（避免预览空白）
-    (() => {
-      if (tbody && 'MutationObserver' in window) {
-        const observer = new MutationObserver(muts => {
-          for (const mut of muts) for (const node of mut.addedNodes) {
-            if (node.tagName === 'TR') {
-              const img = node.querySelector('img'); if (img) img.loading = 'eager';
-            }
-          }
-        });
-        observer.observe(tbody, { childList:true });
-      }
-    })();
-  </script>
+  <!-- 仅加载外部模块，避免内联脚本再被平台截断 -->
+  <script type="module" src="/frontend/public/ui-enhance.js?v=final"></script>
 </body>
 </html>
