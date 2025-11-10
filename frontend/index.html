@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 你可按需改成 /v1/api 或完整网关；页面脚本会优先读取 ?api= 覆盖 -->
   <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api" />
   <title>云贸星 · 智能表格生成器</title>
   <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
@@ -69,19 +70,30 @@
   </div>
 
   <script>
-    // 统一 API 前缀：优先读 <meta name="api-base">，否则回落到 '/v1/api'
+    // 统一 API 前缀：优先 ?api= 覆盖，再读 <meta name="api-base">，最后回退 '/v1/api'
+    (function ensureApiBase(){
+      const meta = document.querySelector('meta[name="api-base"]');
+      const qsApi = new URLSearchParams(location.search).get('api');
+      if (qsApi) meta?.setAttribute('content', qsApi);
+    })();
+
     const API_BASE = document.querySelector('meta[name="api-base"]')?.content || '/v1/api';
+
+    // 统一的图片代理：默认 raw，需要 base64 时传 'base64'
+    function imageProxy(u, format = 'raw') {
+      return `${API_BASE}/image?format=${format}&url=${encodeURIComponent(u)}`;
+    }
+
     const API = {
       parse:   (u,limit)=> `${API_BASE}/catalog/parse?url=${encodeURIComponent(u)}&limit=${limit}`,
-      export:  (u,limit)=> `${API_BASE}/export-xlsx?url=${encodeURIComponent(u)}&limit=${limit}`,
-      image:   (u)=> `${API_BASE}/image?format=raw&url=${encodeURIComponent(u)}`
+      export:  (u,limit)=> `${API_BASE}/export-xlsx?url=${encodeURIComponent(u)}&limit=${limit}`
     };
 
     // 简易 i18n
     const I18N = {
       zh: {
         title:'云贸星 智能表格生成器', sub:'输入目录型网页链接，秒生成 Excel 产品表格。',
-        fetch:'抓取目录', export:'导出 Excel（.xlsx）', clear:'清空数据',
+        fetch:'抓取目录', export:'导出 .xlsx', clear:'清空数据',
         thSku:'货号', thPic:'图片', thDesc:'描述', thPrice:'单价', open:'打开', noUrl:'请输入目录页链接',
         fetching:'抓取中…', fetched:'抓取完成', exportIng:'导出中…', exported:'已触发下载', cleared:'已清空',
       },
@@ -153,7 +165,7 @@
           tr.innerHTML = `
             <td>${i+1}</td>
             <td>${it.sku || ''}</td>
-            <td>${it.img ? `<img class="thumb" src="${API.image(it.img)}" alt="" />` : ''}</td>
+            <td>${it.img ? `<img class="thumb" src="${imageProxy(it.img)}" alt="" />` : ''}</td>
             <td>${it.desc || ''}</td>
             <td>${it.price || ''}</td>
             <td>${it.href ? `<a href="${it.href}" target="_blank">${I18N[lang].open}</a>` : ''}</td>
@@ -180,11 +192,9 @@
 
         const tryOnce = async (href) => {
           return new Promise((resolve,reject)=>{
-            // 直接创建 a 链接触发下载
             const a = document.createElement('a');
             a.href = href;
             a.download = 'catalog.xlsx';
-            // 一些浏览器会静默失败，我们用 3 秒超时兜底
             const timer = setTimeout(()=>reject(new Error('timeout')), 3000);
             a.onclick = ()=> clearTimeout(timer);
             document.body.appendChild(a); a.click(); a.remove();
