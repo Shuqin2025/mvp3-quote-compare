@@ -1,14 +1,8 @@
-// frontend/src/components/ExportButton.jsx
+
+// /frontend/components/ExportButton.jsx
 import React from 'react';
 import { exportToXlsxByItems } from '../../export-xlsx.js';
 
-/**
- * 统一导出按钮
- * props:
- *  - items: 已经渲染在表格里的数据行（数组）
- *  - withImages: 是否嵌图
- *  - filename: 导出文件名
- */
 const ExportButton = ({ items = [], withImages = true, filename = '商品数据导出.xlsx' }) => {
   const onExport = async () => {
     if (!items || items.length === 0) {
@@ -31,4 +25,3 @@ const ExportButton = ({ items = [], withImages = true, filename = '商品数据�
 };
 
 export default ExportButton;
-
