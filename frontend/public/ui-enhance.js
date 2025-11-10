@@ -27,7 +27,7 @@
       return "";
     }
   }
-  const API_BASE = getApiBase();
+  const API_BASE = (()=>{try{const u=new URL(location.href);const api=u.searchParams.get('api');const meta=document.querySelector('meta[name="api-base"]')?.content||'';const base=(api||meta||'/v1/api');return String(base).replace(/\/+$/,'');}catch{ return '/v1/api'; }})();
   console.info("[UI] API_BASE =", API_BASE);
 
   // ---------- base64 helpers ----------
@@ -48,7 +48,7 @@
   }
   async function fetchImageAsBase64ViaApi(url) {
     if (!API_BASE) throw new Error("no API_BASE");
-    const api = `${API_BASE}/v1/api/image?format=base64&url=${encodeURIComponent(url)}`;
+    const api = `${API_BASE}/image?format=base64&url=${encodeURIComponent(url)}`;
     const r = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
@@ -160,7 +160,7 @@
   async function detectType(url) {
     if (!API_BASE) return null;
     try {
-      const r = await fetch(`${API_BASE}/v1/api/detect?url=${encodeURIComponent(url)}`, {
+      const r = await fetch(`${API_BASE}/detect?url=${encodeURIComponent(url)}`, {
         method: "GET",
         mode: "cors",
         credentials: "omit",
@@ -184,7 +184,7 @@
     qs.set("imgDelim", " ");
     if (hintT) qs.set("t", hintT);
 
-    const finalUrl = `${API_BASE}/v1/api/catalog/parse?${qs.toString()}`;
+    const finalUrl = `${API_BASE}/catalog/parse?${qs.toString()}`;
     console.info("[UI] parseCatalog GET →", finalUrl);
 
     const resp = await fetch(finalUrl, {
@@ -266,7 +266,7 @@
 
         const mustProxy = /(^|\.)memoryking\.de$/.test(srcHost);
         const proxyUrl = API_BASE
-          ? `${API_BASE}/v1/api/image?format=raw&url=${encodeURIComponent(srcRaw)}`
+          ? `${API_BASE}/image?format=raw&url=${encodeURIComponent(srcRaw)}`
           : srcRaw;
 
         const isPlaceholder = /loader\.svg|logo|placeholder|spacer\.gif/i.test(srcRaw);
@@ -389,7 +389,7 @@
         const imgUrl = r?.img ? String(r.img) : "";
         if (!imgUrl || !API_BASE) continue;
         try {
-          const api = `${API_BASE}/v1/api/image?format=base64&url=${encodeURIComponent(imgUrl)}`;
+          const api = `${API_BASE}/image?format=base64&url=${encodeURIComponent(imgUrl)}`;
           const resp = await fetch(api, { mode: "cors", credentials: "omit", cache: "no-cache" });
           const j = await resp.json();
           if (!(j && j.ok && j.base64)) continue;
@@ -517,7 +517,7 @@ catch(e){ console.error(e); } }); }
 
   (async () => {
     if (!API_BASE) return;
-    const healthUrl = `${API_BASE}/v1/api/health`;
+    const healthUrl = `${API_BASE}/health`;
     console.info("[UI] health check →", healthUrl);
     try {
       const r = await fetch(healthUrl, { mode: "cors", credentials: "omit" });
