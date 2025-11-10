@@ -1,77 +1,112 @@
 // frontend/export-xlsx.js
-// 统一导出工具：只暴露两个入口，页面其它地方一律不要直接 fetch /v1/export-xlsx
+// ESM module. Provides a single source of truth for calling the backend
+// and a tiny helper for the image proxy.
 
-function getApiBase() {
-  const meta = document.querySelector('meta[name="api-base"]');
-  return (meta && meta.content) || '/v1/api';
+/**
+ * Get API base from <meta name="api-base" content="..."> or window.API_BASE.
+ * Fallback to relative /v1/api so it also works in local preview.
+ */
+export function getApiBase() {
+  try {
+    const el = document.querySelector('meta[name="api-base"]');
+    if (el && el.content) return el.content.replace(/\/+$/, '');
+  } catch (_) {}
+  if (typeof window !== 'undefined' && window.API_BASE) {
+    return String(window.API_BASE).replace(/\/+$/, '');
+  }
+  // final fallback
+  return '/v1/api';
 }
 
-// 统一图片代理（给其它地方用到时也能导入）
+/**
+ * Build the image proxy URL (format = "raw" | "file")
+ * @param {string} originalUrl - The original image url
+ * @param {("raw"|"file")} format - Output format (default: "raw")
+ */
 export function imageProxy(originalUrl, format = 'raw') {
-  const API_BASE = getApiBase();
-  const url = `${API_BASE}/image?format=${encodeURIComponent(format)}&url=${encodeURIComponent(originalUrl)}`;
-  return url;
+  const api = getApiBase();
+  const u = new URL(api + '/image', location.origin);
+  u.searchParams.set('format', format);
+  u.searchParams.set('url', originalUrl);
+  return u.toString();
 }
 
 /**
- * 直接用前端已有的 items 列表导出
- * @param {Array<object>} items 规范化后的行数据
- * @param {string} [filename='导出.xlsx'] 下载文件名
- * @param {boolean} [withImages=true] 是否内嵌图片
+ * POST an array of catalog rows and return a Blob (.xlsx).
+ * Each item in `items` should already be normalized for the backend.
+ * @param {Array<object>} items
+ * @param {{withImages?: boolean, filename?: string}} options
  */
-export async function exportToXlsx(items, filename = '导出.xlsx', withImages = true) {
+export async function exportToXlsx(items, options = {}) {
+  const { withImages = true, filename = 'catalog.xlsx' } = options;
   if (!Array.isArray(items) || items.length === 0) {
-    alert('没有可导出的数据');
-    return;
+    throw new Error('No items to export.');
   }
-  const API_BASE = getApiBase();
-  try {
-    const resp = await fetch(`${API_BASE}/export-xlsx`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, withImages: !!withImages }),
-    });
-    if (!resp.ok) throw new Error(`导出失败：${resp.status}`);
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename || '导出.xlsx';
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    console.error('导出异常', err);
-    alert('导出失败，请稍后重试');
+  const api = getApiBase();
+  const url = api + '/export-xlsx';
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, withImages })
+  });
+
+  if (!res.ok) {
+    const text = await safeText(res);
+    throw new Error(`Export failed (${res.status}): ${text}`);
   }
+
+  const blob = await res.blob();
+  triggerDownload(blob, filename);
+  return blob;
 }
 
 /**
- * 让后端自己去抓某个目录页并导出
- * @param {string} url 目录页地址
- * @param {number} [limit=50] 限制条数
- * @param {string} [filename='导出.xlsx'] 下载文件名
- * @param {boolean} [withImages=true] 是否内嵌图片
+ * Export by letting the backend crawl a page URL directly.
+ * @param {string} pageUrl - The catalog page url to crawl
+ * @param {{limit?: number, withImages?: boolean, filename?: string}} options
  */
-export async function exportUrlToXlsx(url, limit = 50, filename = '导出.xlsx', withImages = true) {
-  if (!url) {
-    alert('缺少目录页 URL');
-    return;
+export async function exportToXlsxFromUrl(pageUrl, options = {}) {
+  const { limit = 50, withImages = true, filename = 'catalog.xlsx' } = options;
+  if (!pageUrl) throw new Error('pageUrl is required.');
+
+  const api = getApiBase();
+  const u = new URL(api + '/export-xlsx', location.origin);
+  u.searchParams.set('url', pageUrl);
+  if (limit != null) u.searchParams.set('limit', String(limit));
+  if (withImages) u.searchParams.set('withImages', '1');
+
+  const res = await fetch(u.toString(), { method: 'GET' });
+  if (!res.ok) {
+    const text = await safeText(res);
+    throw new Error(`Export (by url) failed (${res.status}): ${text}`);
   }
-  const API_BASE = getApiBase();
-  try {
-    const resp = await fetch(`${API_BASE}/export-xlsx?url=${encodeURIComponent(url)}&limit=${encodeURIComponent(limit)}&withImages=${withImages ? '1' : '0'}`, {
-      method: 'GET',
-    });
-    if (!resp.ok) throw new Error(`导出失败：${resp.status}`);
-    const blob = await resp.blob();
-    const obj = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = obj;
-    a.download = filename || '导出.xlsx';
-    a.click();
-    URL.revokeObjectURL(obj);
-  } catch (err) {
-    console.error('导出异常', err);
-    alert('导出失败，请稍后重试');
-  }
+  const blob = await res.blob();
+  triggerDownload(blob, filename);
+  return blob;
 }
+
+// ---- helpers ---------------------------------------------------------------
+
+async function safeText(res) {
+  try { return await res.text(); } catch { return '<no body>'; }
+}
+
+function triggerDownload(blob, filename) {
+  const a = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  a.href = url;
+  a.download = filename || 'catalog.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// default export kept for convenience in plain <script type="module">
+export default {
+  getApiBase,
+  imageProxy,
+  exportToXlsx,
+  exportToXlsxFromUrl
+};
