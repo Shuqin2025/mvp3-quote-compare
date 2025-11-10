@@ -1,112 +1,84 @@
 // frontend/export-xlsx.js
-// ESM module. Provides a single source of truth for calling the backend
-// and a tiny helper for the image proxy.
+// 统一：读取 <meta name="api-base">，并做智能兼容：
+// - catalog / health 继续用 API_BASE（可能是 /v1/api 或 /v1）
+// - image / export-xlsx 强制使用 V1_BASE（把 /v1/api 自动降级成 /v1/）
 
-/**
- * Get API base from <meta name="api-base" content="..."> or window.API_BASE.
- * Fallback to relative /v1/api so it also works in local preview.
- */
-export function getApiBase() {
-  try {
-    const el = document.querySelector('meta[name="api-base"]');
-    if (el && el.content) return el.content.replace(/\/+$/, '');
-  } catch (_) {}
-  if (typeof window !== 'undefined' && window.API_BASE) {
-    return String(window.API_BASE).replace(/\/+$/, '');
-  }
-  // final fallback
-  return '/v1/api';
+function getApiBase() {
+  // 1) meta 标签优先
+  const meta = document.querySelector('meta[name="api-base"]');
+  const fromMeta = meta?.getAttribute('content')?.trim();
+  // 2) 兜底：window.API_BASE 或同源 /v1
+  const fallback = window.API_BASE || `${location.origin}/v1`;
+  return (fromMeta || fallback).replace(/\/+$/, ''); // 去尾斜杠
 }
 
-/**
- * Build the image proxy URL (format = "raw" | "file")
- * @param {string} originalUrl - The original image url
- * @param {("raw"|"file")} format - Output format (default: "raw")
- */
-export function imageProxy(originalUrl, format = 'raw') {
-  const api = getApiBase();
-  const u = new URL(api + '/image', location.origin);
-  u.searchParams.set('format', format);
-  u.searchParams.set('url', originalUrl);
-  return u.toString();
-}
+const API_BASE = getApiBase();
+// 把 “…/v1/api(可带/结尾)” 兼容降级为 “…/v1/”，其余保持原样
+const V1_BASE = API_BASE.replace(/\/api\/?$/, '/')  // …/v1/api → …/v1/
+                      .replace(/\/+$/, '/')         // 确保以单个 / 结尾
+                      .replace(/\/$/, '/');         // 保留一个 /
 
-/**
- * POST an array of catalog rows and return a Blob (.xlsx).
- * Each item in `items` should already be normalized for the backend.
- * @param {Array<object>} items
- * @param {{withImages?: boolean, filename?: string}} options
- */
-export async function exportToXlsx(items, options = {}) {
-  const { withImages = true, filename = 'catalog.xlsx' } = options;
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new Error('No items to export.');
-  }
-  const api = getApiBase();
-  const url = api + '/export-xlsx';
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items, withImages })
-  });
-
-  if (!res.ok) {
-    const text = await safeText(res);
-    throw new Error(`Export failed (${res.status}): ${text}`);
-  }
-
-  const blob = await res.blob();
-  triggerDownload(blob, filename);
-  return blob;
-}
-
-/**
- * Export by letting the backend crawl a page URL directly.
- * @param {string} pageUrl - The catalog page url to crawl
- * @param {{limit?: number, withImages?: boolean, filename?: string}} options
- */
-export async function exportToXlsxFromUrl(pageUrl, options = {}) {
-  const { limit = 50, withImages = true, filename = 'catalog.xlsx' } = options;
-  if (!pageUrl) throw new Error('pageUrl is required.');
-
-  const api = getApiBase();
-  const u = new URL(api + '/export-xlsx', location.origin);
-  u.searchParams.set('url', pageUrl);
-  if (limit != null) u.searchParams.set('limit', String(limit));
-  if (withImages) u.searchParams.set('withImages', '1');
-
-  const res = await fetch(u.toString(), { method: 'GET' });
-  if (!res.ok) {
-    const text = await safeText(res);
-    throw new Error(`Export (by url) failed (${res.status}): ${text}`);
-  }
-  const blob = await res.blob();
-  triggerDownload(blob, filename);
-  return blob;
-}
-
-// ---- helpers ---------------------------------------------------------------
-
-async function safeText(res) {
-  try { return await res.text(); } catch { return '<no body>'; }
-}
-
-function triggerDownload(blob, filename) {
+/** 工具：下载 Blob 为文件 */
+async function downloadBlobAs(blob, filename = '导出.xlsx') {
+  const url = window.URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const url = URL.createObjectURL(blob);
   a.href = url;
-  a.download = filename || 'catalog.xlsx';
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  window.URL.revokeObjectURL(url);
 }
 
-// default export kept for convenience in plain <script type="module">
-export default {
-  getApiBase,
-  imageProxy,
-  exportToXlsx,
-  exportToXlsxFromUrl
-};
+/** 图片代理：默认 raw */
+export function imageProxy(originalUrl, format = 'raw') {
+  return `${V1_BASE}image?format=${encodeURIComponent(format)}&url=${encodeURIComponent(originalUrl)}`;
+}
+
+/** 通过“列表页 URL”发起导出（后端自行抓取解析） */
+export async function exportToXlsxByUrl({
+  url,
+  limit = 50,
+  withImages = true,
+  filename = '商品数据导出.xlsx',
+} = {}) {
+  if (!url) throw new Error('exportToXlsxByUrl: 缺少 url');
+
+  const res = await fetch(`${V1_BASE}export-xlsx`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, limit, withImages }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`导出失败(${res.status}): ${text}`);
+  }
+  const blob = await res.blob();
+  await downloadBlobAs(blob, filename);
+}
+
+/** 通过“已结构化 items”发起导出（前端已拿到 rows 的情况） */
+export async function exportToXlsxByItems({
+  items,
+  withImages = true,
+  filename = '商品数据导出.xlsx',
+} = {}) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('exportToXlsxByItems: items 为空');
+  }
+
+  const res = await fetch(`${V1_BASE}export-xlsx`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, withImages }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`导出失败(${res.status}): ${text}`);
+  }
+  const blob = await res.blob();
+  await downloadBlobAs(blob, filename);
+}
+
+// 便于其它模块使用基础地址（如需要）
+export { API_BASE, V1_BASE };
