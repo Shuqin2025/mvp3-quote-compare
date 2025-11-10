@@ -22,9 +22,15 @@ function toastInfo(msg, ms = 2400) {
 }
 
 function readApiBase() {
-  const u = new URL(window.location.href);
-  const api = u.searchParams.get('api');
-  return api ? api.replace(/\/+$/, '') : '';
+  try {
+    const u = new URL(window.location.href);
+    const api = u.searchParams.get('api');
+    const meta = document.querySelector('meta[name="api-base"]')?.content || '';
+    const base = (api || meta || '/v1/api');
+    return String(base).replace(/\/+$/, '');
+  } catch {
+    return '/v1/api';
+  }
 }
 const API_BASE = readApiBase();
 
@@ -86,7 +92,7 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const resp = await axios.get(`${API_BASE}/v1/api/catalog/parse`, {
+      const resp = await axios.get(`${API_BASE}/catalog/parse`, {
         params: { url, limit },
         headers: { 'X-Lang': apiLang },
       });
