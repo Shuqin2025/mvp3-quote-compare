@@ -14,55 +14,46 @@
     .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
     .btn:disabled { opacity: .6; cursor:not-allowed; }
     .input { min-width:320px; flex:1; height:40px; padding:0 12px; border:1px solid #ddd; border-radius:8px; }
-    .card { margin-top:16px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; }
-    .card-head { padding:10px 14px; border-bottom:1px solid #eee; color:#666; font-size:14px; }
-    .card-body { min-height:420px; overflow:auto; padding:8px; }
+    .card { margin-top:16px; border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; }
+    .card-head { padding: 14px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; gap:12px; }
+    .card-body { min-height:420px; overflow:auto; padding: 16px; }
     table { width:100%; border-collapse:collapse; }
-    th, td { border:1px solid #eee; padding:6px 8px; vertical-align:top; }
+    th, td { border:1px solid #eee; padding: 8px; vertical-align:top; }
     th { background:#fafafa; }
     a { color:#2563eb; text-decoration:none; }
     a:hover { text-decoration:underline; }
-    .alert { margin-top:12px; border-radius:8px; padding:10px 12px; font-size:14px; }
+    .alert { margin-top:12px; border-radius:8px; padding:10px 12px; }
     .alert.ok { background:#e8f5e9; border:1px solid #c8e6c9; color:#2e7d32; }
-    .alert.info { background:#fff8e1; border:1px solid #ffe082; color:#6b5900; }
-    img.thumb { width:72px; height:72px; object-fit:contain; background:#f8f8f8; border:1px solid #eee; border-radius:6px; }
+    .alert.info { background:#fff8e1; border:1px solid #ffecb3; color:#8d6e63; }
+    img.thumb { width:72px; height:72px; object-fit:contain; background:#fff; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="row" id="langbar">
-      <button class="btn" data-lang="zh">CN 中文</button>
-      <button class="btn" data-lang="de">DE Deutsch</button>
-      <button class="btn" data-lang="en">GB English</button>
+      <button class="btn" onclick="setLang('zh')">中文</button>
+      <button class="btn" onclick="setLang('en')">English</button>
+      <button class="btn" onclick="setLang('de')">Deutsch</button>
     </div>
 
-    <h1 id="title" style="margin:16px 0 4px; font-size:24px; font-weight:700">云贸星 智能表格生成器</h1>
-    <div id="subtitle" style="color:#6b7280">输入目录型网页链接，秒生成 Excel 产品表格。</div>
-
-    <div class="row" style="margin-top:16px">
-      <input id="txtUrl" class="input" placeholder="在此粘贴目录型页面链接（例如某一类目的商品列表页）">
-      <button id="btnFetch" class="btn primary">抓取目录</button>
-      <select id="limit" class="btn"><option>50</option><option>100</option><option>200</option></select>
-      <button id="btnExport" class="btn">导出 Excel（.xlsx）</button>
-      <button id="btnClear" class="btn">清空数据</button>
-    </div>
-
-    <div id="status" class="alert info">ui_no_data</div>
-    <div id="okbar" class="alert ok" style="display:none"></div>
+    <h1 id="title" style="margin:16px 0 8px; font-weight:600">云贸星 智能表格生成器</h1>
+    <div style="color:#6b7280" id="subtitle">输入目录型网页链接，秒生成 Excel 产品表格。</div>
 
     <div class="card">
-      <div class="card-head" id="theadNote">—</div>
+      <div class="card-head">
+        <input id="txtUrl" class="input" placeholder="https://example.com/category/..." />
+        <input id="limit" class="input" style="max-width:140px" value="50" />
+        <button id="btnFetch" class="btn primary">抓取目录</button>
+        <button id="btnExport" class="btn">导出 Excel（.xlsx）</button>
+        <button id="btnClear" class="btn">清空数据</button>
+      </div>
       <div class="card-body">
+        <div id="status" class="alert info">准备就绪</div>
+        <div id="okbar" class="alert ok" style="display:none;"></div>
         <table id="tbl">
           <thead>
             <tr>
-              <th>#</th>
-              <th id="thSku">Item No.</th>
-              <th id="thPic">Picture</th>
-              <th id="thDesc">Description</th>
-              <th>MOQ</th>
-              <th id="thPrice">Unit Price</th>
-              <th>Link</th>
+              <th>#</th><th>货号</th><th>图片</th><th>描述</th><th>单价</th><th>打开</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -78,15 +69,12 @@
   </div>
 
   <script>
-    // ==============================
-    // 后端基址：只写一次，不再拼两个地址导致 “%20与%20” 的错误
-    // ==============================
-    const API_BASE = "https://yunivera-gateway.onrender.com";     // 你的 Render 网关
+    // 统一 API 前缀：优先读 <meta name="api-base">，否则回落到 '/v1/api'
+    const API_BASE = document.querySelector('meta[name="api-base"]')?.content || '/v1/api';
     const API = {
-      parse:   (u,limit)=> `${API_BASE}/v1/api/catalog/parse?url=${encodeURIComponent(u)}&limit=${limit}`,
-      exportG: (u,limit)=> `${API_BASE}/v1/export-xlsx?url=${encodeURIComponent(u)}&limit=${limit}`, // 兼容别名
-      exportF: (u,limit)=> `${API_BASE}/v1/api/export-xlsx?url=${encodeURIComponent(u)}&limit=${limit}`, // 失败回退
-      image:   (u)=> `${API_BASE}/v1/api/image?format=raw&url=${encodeURIComponent(u)}` // 图片统一用代理，避免懒加载/CORS
+      parse:   (u,limit)=> `${API_BASE}/catalog/parse?url=${encodeURIComponent(u)}&limit=${limit}`,
+      export:  (u,limit)=> `${API_BASE}/export-xlsx?url=${encodeURIComponent(u)}&limit=${limit}`,
+      image:   (u)=> `${API_BASE}/image?format=raw&url=${encodeURIComponent(u)}`
     };
 
     // 简易 i18n
@@ -104,7 +92,8 @@
         fetching:'Fetching…', fetched:'Done', exportIng:'Exporting…', exported:'Download started', cleared:'Cleared',
       },
       de: {
-        title:'Yunivera · Tabellengenerator', sub:'Fügen Sie eine Katalog-/Listen-URL ein.',
+        title:'Yunivera · Tabellengenerator',
+        sub:'Fügen Sie eine Katalog-/Listen-URL ein.',
         fetch:'Abrufen', export:'Export (.xlsx)', clear:'Leeren',
         thSku:'Artikel-Nr.', thPic:'Bild', thDesc:'Beschreibung', thPrice:'Preis', open:'Öffnen', noUrl:'Bitte URL eingeben',
         fetching:'Lädt…', fetched:'Fertig', exportIng:'Exportiert…', exported:'Download gestartet', cleared:'Geleert',
@@ -120,69 +109,58 @@
 
     function setLang(code){
       lang = I18N[code] ? code : 'zh';
-      const t = I18N[lang];
-      $('#title').textContent = t.title;
-      $('#subtitle').textContent = t.sub;
-      btnFetch.textContent = t.fetch;
-      btnExport.textContent = t.export;
-      $('#btnClear').textContent = t.clear;
-      $('#thSku').textContent = t.thSku;
-      $('#thPic').textContent = t.thPic;
-      $('#thDesc').textContent = t.thDesc;
-      $('#thPrice').textContent = t.thPrice;
+      $('#title').textContent = I18N[lang].title;
+      $('#subtitle').textContent = I18N[lang].sub;
+      btnFetch.textContent = I18N[lang].fetch;
+      btnExport.textContent = I18N[lang].export;
+      $('#btnClear').textContent = I18N[lang].clear;
+      const ths = document.querySelectorAll('#tbl thead th');
+      ths[1].textContent = I18N[lang].thSku;
+      ths[2].textContent = I18N[lang].thPic;
+      ths[3].textContent = I18N[lang].thDesc;
+      ths[4].textContent = I18N[lang].thPrice;
     }
-    $('#langbar').addEventListener('click', e=>{
-      const code = e.target?.dataset?.lang;
-      if(code) setLang(code);
-    });
     setLang('zh');
 
-    function setStatus(msg, ok=false) {
-      statusBar.className = 'alert ' + (ok ? 'ok' : 'info');
-      statusBar.textContent = msg;
-      if (ok) { okbar.style.display = 'block'; okbar.textContent = msg; }
-      else okbar.style.display = 'none';
+    function toggleBusy(busy){
+      [btnFetch, btnExport, $('#btnClear'), $('#txtUrl'), $('#limit')].forEach(el=> el.disabled = !!busy);
+      document.body.style.cursor = busy ? 'progress' : 'default';
+    }
+    function setStatus(text, ok=false){
+      statusBar.textContent = text;
+      okbar.style.display = ok ? 'block' : 'none';
+      if (ok) okbar.textContent = text;
     }
 
-    function rowHtml(i, it) {
-      // 图片统一走后端代理，自动把 webp/lazy 处理掉
-      const imgUrl = it.img ? API.image(it.img) : '';
-      const img = it.img ? `<img class="thumb" src="${imgUrl}" alt="">` : '';
-      const link = it.url ? `<a href="${it.url}" target="_blank">${I18N[lang].open}</a>` : '';
-      return `<tr>
-        <td>${i+1}</td>
-        <td>${it.sku||''}</td>
-        <td>${img}</td>
-        <td>${it.title||it.desc||''}</td>
-        <td>${it.moq||''}</td>
-        <td>${it.price||''}</td>
-        <td>${link}</td>
-      </tr>`;
-    }
-
-    function toggleBusy(b){
-      btnFetch.disabled = b; btnExport.disabled = b;
-      $('#txtUrl').disabled = b; $('#limit').disabled = b;
-    }
-
-    async function fetchCatalog() {
+    // 抓取目录
+    async function fetchCatalog(){
       try {
         const url = $('#txtUrl').value.trim();
         const limit = parseInt($('#limit').value,10) || 50;
         if (!url) return setStatus(I18N[lang].noUrl);
-
         setStatus(I18N[lang].fetching); toggleBusy(true);
+
         const api = API.parse(url,limit);
-        console.log('[GET]', api);
         const r = await fetch(api, { mode:'cors' });
-        if (!r.ok) throw new Error('HTTP '+r.status);
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
         const data = await r.json();
 
+        // 渲染
         tbody.innerHTML = '';
-        const rows = Array.isArray(data?.rows) ? data.rows : (Array.isArray(data?.items) ? data.items : []);
-        rows.forEach((it, i) => tbody.insertAdjacentHTML('beforeend', rowHtml(i, it)));
+        for (let i=0; i<data.length; i++){
+          const it = data[i];
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${i+1}</td>
+            <td>${it.sku || ''}</td>
+            <td>${it.img ? `<img class="thumb" src="${API.image(it.img)}" alt="" />` : ''}</td>
+            <td>${it.desc || ''}</td>
+            <td>${it.price || ''}</td>
+            <td>${it.href ? `<a href="${it.href}" target="_blank">${I18N[lang].open}</a>` : ''}</td>
+          `;
+          tbody.appendChild(tr);
+        }
 
-        $('#theadNote').textContent = `Adapter: ${data?.adapter||'-'} | Count: ${rows.length}`;
         setStatus(I18N[lang].fetched, true);
       } catch (e) {
         console.error(e);
@@ -192,7 +170,7 @@
       }
     }
 
-    // GET 下载；若别名 /v1/export-xlsx 仍被网关阻拦，自动回退到 /v1/api/export-xlsx
+    // GET 下载：统一走 `${API_BASE}/export-xlsx`
     async function exportToXlsx() {
       try {
         const url = $('#txtUrl').value.trim();
@@ -210,16 +188,11 @@
             const timer = setTimeout(()=>reject(new Error('timeout')), 3000);
             a.onclick = ()=> clearTimeout(timer);
             document.body.appendChild(a); a.click(); a.remove();
-            // 不阻塞：假定成功
             resolve(true);
           });
         };
 
-        try {
-          await tryOnce(API.exportG(url,limit));
-        } catch {
-          await tryOnce(API.exportF(url,limit)); // 回退
-        }
+        await tryOnce(API.export(url,limit));
         setStatus(I18N[lang].exported, true);
       } catch (e) {
         console.error(e);
@@ -240,12 +213,11 @@
         const observer = new MutationObserver(muts => {
           for (const mut of muts) for (const node of mut.addedNodes) {
             if (node.tagName === 'TR') {
-              const img = node.querySelector('img');
-              if (img && img.hasAttribute('loading')) img.removeAttribute('loading');
+              const img = node.querySelector('img'); if (img) img.loading = 'eager';
             }
           }
         });
-        observer.observe(tbody, { childList: true });
+        observer.observe(tbody, { childList:true });
       }
     })();
   </script>
