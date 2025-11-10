@@ -1,6 +1,20 @@
 // frontend/src/components/ExportButton.jsx
 import React, { useState } from "react";
 
+// Helper to read API base: ?api= overrides, then <meta name="api-base">, else '/v1/api'
+function __readApiBase() {
+  try {
+    const u = new URL(window.location.href);
+    const api = u.searchParams.get('api');
+    const meta = document.querySelector('meta[name="api-base"]')?.content || '';
+    const base = (api || meta || '/v1/api');
+    return String(base).replace(/\/+$/, '');
+  } catch {
+    return '/v1/api';
+  }
+}
+
+
 /**
  * props:
  *   items: 要导出的行数据数组（你列表里显示的那份）
@@ -21,7 +35,7 @@ export default function ExportButton({
       alert("没找到要导出的数据～");
       return;
     }
-    const base = apiBase || `${window.location.origin}/v1/api`;
+    const base = (apiBase && apiBase.replace(/\/+$/, '')) || __readApiBase();
     const url = `${base}/export-xlsx`;
 
     try {
