@@ -3,21 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 可用 ?api= 覆盖；否则读取此 meta；再否则回退 /v1/api -->
+  <!-- 允许 ?api= 覆盖；否则读这里；再否则回退 /v1/api -->
   <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api" />
+  <meta name="ui-enhance" content="on" />
   <title>云贸星 · 智能表格生成器</title>
 </head>
 <body>
-  <!-- 可选增强开关 + 导出模块位置（相对 frontend/index.html） -->
+  <!-- 可选增强开关 & 可配置导出模块（从 frontend/ 下看相对路径） -->
   <script>
     window.UI_ENHANCE = {
-      enhance: true,                    // 开启 plus 版
-      exportModule: './export-xlsx.js', // ← 这里是相对 frontend/ 的正确写法
+      enhance: true,
+      exportModule: './export-xlsx.js'   // ← 这里指向 frontend/export-xlsx.js
     };
   </script>
 
-  <!-- 注意：public 下的文件要用根路径 / 引用；不要写 ./public/... -->
-  <script type="module" src="/ui-enhance.plus.js?enhance=1"></script>
-  <!-- 如果临时想用普通版，改为：<script type="module" src="/ui-enhance.js?v=final"></script> -->
+  <!-- 一定要用相对路径：index.html 在 frontend/，脚本在 frontend/public/ -->
+  <script type="module" src="./public/ui-enhance.plus.js?enhance=1"></script>
 </body>
 </html>
