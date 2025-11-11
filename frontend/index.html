@@ -3,21 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 可用 ?api= 覆盖，否则读此 meta，再否则回退 /v1/api -->
   <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api" />
   <meta name="ui-enhance" content="on" />
   <title>云贸星 · 智能表格生成器</title>
 </head>
 <body>
   <script>
-    // 可选增强开关 + 导出模块路径（注意：相对 frontend/index.html）
     window.UI_ENHANCE = {
       enhance: true,
-      exportModule: './public/export-xlsx.js'   // ← 这里指向 frontend/public/export-xlsx.js
+      // 你把 export-xlsx.js 放在 frontend/public 下了，这里就不用再给路径；
+      // 具体导入在 ui-enhance.js 里用 ESM 一行搞定。
     };
   </script>
 
-  <!-- 入口脚本一定用相对路径：相对 frontend/index.html，指向 frontend/public/ -->
-  <script type="module" src="./public/ui-enhance.plus.js?enhance=1"></script>
+  <!-- 关键：这里改为 ui-enhance.js（你仓库里存在的那个文件名） -->
+  <script type="module" src="./public/ui-enhance.js?enhance=1"></script>
 </body>
 </html>
+
