@@ -3,66 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 可用 ?api= 覆盖；否则读此 meta；再否则回退 /v1/api -->
+  <!-- 可用 ?api= 覆盖；否则读取此 meta；再否则回退 /v1/api -->
   <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api" />
-  <!-- 可选：显式开启增强（与 ?enhance=1 等价）。若想默认关闭，把 content 改为 off 或删除本行。 -->
-  <meta name="ui-enhance" content="on" />
-
   <title>云贸星 · 智能表格生成器</title>
-  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
-  <style>
-    body { background:#fafafa; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; }
-    .wrap { max-width:980px; margin:0 auto; padding:32px 20px; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .btn { height:40px; padding:0 14px; border:1px solid #ddd; border-radius:8px; background:#fff; cursor:pointer; }
-    .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
-    .btn:disabled { opacity:.6; cursor:not-allowed; }
-    .input { min-width:320px; flex:1; height:40px; padding:0 12px; border:1px solid #ddd; border-radius:8px; }
-    .card { margin-top:16px; border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; }
-    .card-head { padding:14px; border-bottom:1px solid #e5e7eb; display:flex; gap:12px; align-items:center; }
-    .card-body { min-height:420px; overflow:auto; padding:16px; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { border:1px solid #eee; padding:8px; vertical-align:top; }
-    th { background:#fafafa; }
-    .alert { margin-top:12px; border-radius:8px; padding:10px 12px; }
-    .alert.ok { background:#e8f5e9; border:1px solid #c8e6c9; color:#2e7d32; }
-    .alert.info { background:#fff8e1; border:1px solid #ffecb3; color:#8d6e63; }
-    img.thumb { width:72px; height:72px; object-fit:contain; background:#fff; }
-  </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <div class="card-head">
-        <input id="txtUrl" class="input" placeholder="https://example.com/category/..." />
-        <input id="limit" class="input" style="max-width:140px" value="50" />
-        <button id="btnFetch" class="btn primary">抓取目录</button>
-        <button id="btnExport" class="btn">导出 Excel（.xlsx）</button>
-        <button id="btnClear" class="btn">清空数据</button>
-      </div>
-      <div class="card-body">
-        <div id="status" class="alert info">准备就绪</div>
-        <div id="okbar" class="alert ok" style="display:none;"></div>
-        <table id="tbl">
-          <thead>
-            <tr><th>#</th><th>货号</th><th>图片</th><th>描述</th><th>单价</th><th>打开</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- 方案A：明确指定 export-xlsx.js 在 /frontend/export-xlsx.js -->
+  <!-- 可选增强开关 + 导出模块位置（相对 frontend/index.html） -->
   <script>
     window.UI_ENHANCE = {
-      enhance: true,                  // 等价 ?enhance=1 或 meta[name=ui-enhance]=on
-      exportModule: '../export-xlsx.js' // 从 frontend/public/ 回到 frontend/ 命中正确文件
+      enhance: true,                    // 开启 plus 版
+      exportModule: './export-xlsx.js', // ← 这里是相对 frontend/ 的正确写法
     };
   </script>
 
-  <!-- 使用 plus 版本；如需回退到旧版 ui-enhance.js，可改为下方注释行 -->
-  <script type="module" src="./public/ui-enhance.plus.js?enhance=1"></script>
-  <!-- 回退行（备忘）：<script type="module" src="./public/ui-enhance.js"></script> -->
+  <!-- 注意：public 下的文件要用根路径 / 引用；不要写 ./public/... -->
+  <script type="module" src="/ui-enhance.plus.js?enhance=1"></script>
+  <!-- 如果临时想用普通版，改为：<script type="module" src="/ui-enhance.js?v=final"></script> -->
 </body>
 </html>
