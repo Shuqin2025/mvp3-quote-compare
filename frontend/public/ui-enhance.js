@@ -1,7 +1,10 @@
 // /frontend/public/ui-enhance.plus.js
 // 极简 + 可选增强开关版（不直拼 /v1/*，统一走 export-xlsx.js 暴露的方法）
+// ——本版适配：export-xlsx.js 与本文件位于同一目录（frontend/public/）
 
-// ------- 小工具：读取开关 / 动态 import / 轻提示 -------
+import { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } from './export-xlsx.js';
+
+// ------- 小工具：读取开关 / 轻提示 -------
 const qs = new URLSearchParams(location.search);
 const CFG = {
   // 开启增强的三种方式：?enhance=1；<meta name="ui-enhance" content="on">；window.UI_ENHANCE = { enhance:true }
@@ -9,14 +12,6 @@ const CFG = {
     qs.get('enhance') === '1' ||
     (document.querySelector('meta[name="ui-enhance"]')?.content || '').toLowerCase() === 'on' ||
     (typeof window !== 'undefined' && window.UI_ENHANCE && window.UI_ENHANCE.enhance === true),
-
-  // export-xlsx.js 的候选相对路径（从 frontend/public/ 出发）
-  exportModuleCandidates: [
-    '../../export-xlsx.js',   // 仓库根：/export-xlsx.js
-    '../export-xlsx.js',      // 放在 /frontend/export-xlsx.js
-    './export-xlsx.js',       // 放在 /frontend/public/export-xlsx.js（极端兜底）
-    '/export-xlsx.js'         // 运行时真正网站根（若部署到根）
-  ],
 };
 
 function toast(msg, ms = 2200) {
@@ -39,24 +34,8 @@ function toast(msg, ms = 2200) {
   } catch { /* 忽略 */ }
 }
 
-async function loadExportModule() {
-  const customPath =
-    document.currentScript?.dataset?.exportXlsx ||
-    (typeof window !== 'undefined' && window.UI_ENHANCE && window.UI_ENHANCE.exportModule);
-  const tryPaths = customPath ? [customPath, ...CFG.exportModuleCandidates] : CFG.exportModuleCandidates;
-
-  for (const p of tryPaths) {
-    try {
-      const m = await import(p);
-      if (m?.getApiBase && m?.imageProxy) return m;
-    } catch { /* 尝试下一条 */ }
-  }
-  throw new Error('无法加载 export-xlsx.js（请检查路径：可在 <script> 上用 data-export-xlsx 指定）');
-}
-
 // ------- 极简：抓取 / 渲染 / 导出 -------
 (async () => {
-  const { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } = await loadExportModule();
   const API_BASE = getApiBase();
 
   // DOM 钩子（按你的 index.html 约定的 id）
@@ -96,7 +75,7 @@ async function loadExportModule() {
         <td>${it.url ? `<a href="${it.url}" target="_blank" rel="noreferrer">打开</a>` : ''}</td>
       `;
       els.tbody.appendChild(tr);
-    });
+    }));
   }
 
   async function fetchCatalog() {
@@ -223,5 +202,4 @@ async function loadExportModule() {
   // 5) 成功/失败轻提示（基于 setStatus + toast）
   const origSetStatus = setStatus;
   setStatus = (m, ok = false) => { origSetStatus(m, ok); toast(m); }; // 覆盖本地闭包引用
-
 })();
