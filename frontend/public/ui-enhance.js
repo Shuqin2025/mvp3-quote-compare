@@ -1,64 +1,54 @@
-// /frontend/public/ui-enhance.plus.js
-// 极简 + 可选增强开关版（不直拼 /v1/*，统一走 export-xlsx.js 暴露的方法）
-// ——本版适配：export-xlsx.js 与本文件位于同一目录（frontend/public/）
-
+// 文件：frontend/public/ui-enhance.plus.js
+// 功能：只做 UI/DOM 增强；所有网络调用统一走 getApiBase()/imageProxy()/export*；不写 /v1/* 直链。
+// 重要：此版假定 export-xlsx.js 与本文件在同一目录（frontend/public/）
 import { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } from './export-xlsx.js';
 
-// ------- 小工具：读取开关 / 轻提示 -------
-const qs = new URLSearchParams(location.search);
-const CFG = {
-  // 开启增强的三种方式：?enhance=1；<meta name="ui-enhance" content="on">；window.UI_ENHANCE = { enhance:true }
-  enhance:
-    qs.get('enhance') === '1' ||
-    (document.querySelector('meta[name="ui-enhance"]')?.content || '').toLowerCase() === 'on' ||
-    (typeof window !== 'undefined' && window.UI_ENHANCE && window.UI_ENHANCE.enhance === true),
-};
-
-function toast(msg, ms = 2200) {
-  try {
-    let bar = document.getElementById('__toast__');
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = '__toast__';
-      bar.style.cssText =
-        'position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;';
-      document.body.appendChild(bar);
-    }
-    const item = document.createElement('div');
-    item.textContent = msg;
-    item.style.cssText =
-      'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.15);font-size:14px;max-width:360px;';
-    bar.appendChild(item);
-    setTimeout(() => (item.style.opacity = '0'), ms);
-    setTimeout(() => item.remove(), ms + 320);
-  } catch { /* 忽略 */ }
-}
-
-// ------- 极简：抓取 / 渲染 / 导出 -------
-(async () => {
+(() => {
+  const $ = (s, r=document) => r.querySelector(s);
   const API_BASE = getApiBase();
 
-  // DOM 钩子（按你的 index.html 约定的 id）
-  const $ = (s, r = document) => r.querySelector(s);
+  // 读开关：?enhance=1 或 <meta name="ui-enhance" content="on">
+  const qs = new URLSearchParams(location.search);
+  const onByMeta = (document.querySelector('meta[name="ui-enhance"]')?.content || '').toLowerCase() === 'on';
+  const ENHANCE_ON = (qs.get('enhance') === '1') || onByMeta || (window.UI_ENHANCE?.enhance === true);
+  if (!ENHANCE_ON) return;
+
   const els = {
-    url: $('#txtUrl') || $('#url') || $('input[type="url"]') || $('input'),
-    limit: $('#limit') || $('#selLimit') || $('select'),
-    btnFetch: $('#btnFetch'),
+    url:   $('#txtUrl')   || $('#url') || $('input[type="url"]') || $('input'),
+    limit: $('#limit')    || $('#selLimit') || $('select'),
+    btnFetch:  $('#btnFetch'),
     btnExport: $('#btnExport'),
-    btnClear: $('#btnClear'),
+    btnClear:  $('#btnClear'),
     status: $('#status') || $('.alert') || null,
-    okbar: $('#okbar') || null,
-    tbody: $('#tbl tbody') || $('tbody'),
-    thead: $('#tbl thead'),
+    okbar:  $('#okbar') || null,
+    tbody:  $('#tbl tbody') || $('tbody'),
   };
+
+  function toast(msg, ms = 2200) {
+    try {
+      let bar = document.getElementById('__toast__');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = '__toast__';
+        bar.style.cssText = 'position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;';
+        document.body.appendChild(bar);
+      }
+      const item = document.createElement('div');
+      item.textContent = msg;
+      item.style.cssText = 'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.15);font-size:14px;max-width:360px;';
+      bar.appendChild(item);
+      setTimeout(() => { item.style.opacity='0'; item.style.transition='opacity .3s'; }, ms);
+      setTimeout(() => item.remove(), ms + 320);
+    } catch { /* 忽略 */ }
+  }
 
   function setBusy(b) {
     [els.url, els.limit, els.btnFetch, els.btnExport, els.btnClear].forEach(el => { if (el) el.disabled = !!b; });
     document.body.style.cursor = b ? 'progress' : 'default';
   }
   function setStatus(msg, ok = false) {
-    if (els.status) { els.status.textContent = msg; els.status.style.display = 'block'; }
-    if (els.okbar) { els.okbar.textContent = msg; els.okbar.style.display = ok ? 'block' : 'none'; }
+    if (els.status) { els.status.textContent = msg; els.status.style.display='block'; }
+    if (els.okbar)  { els.okbar.textContent  = msg; els.okbar.style.display  = ok ? 'block' : 'none'; }
   }
 
   function renderRows(items = []) {
@@ -67,15 +57,15 @@ function toast(msg, ms = 2200) {
     items.forEach((it, i) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${i + 1}</td>
-        <td>${it.sku || it.code || it.id || ''}</td>
-        <td>${it.img ? `<img class="thumb" loading="lazy" src="${imageProxy(it.img,'raw')}" alt="" />` : ''}</td>
-        <td>${it.title || it.name || it.desc || ''}</td>
+        <td>${i+1}</td>
+        <td>${it.sku || ''}</td>
+        <td>${it.img ? `<img class="thumb" src="${imageProxy(it.img,'raw')}" alt="" />` : ''}</td>
+        <td>${it.title || it.desc || ''}</td>
         <td>${it.price || ''}</td>
         <td>${it.url ? `<a href="${it.url}" target="_blank" rel="noreferrer">打开</a>` : ''}</td>
       `;
       els.tbody.appendChild(tr);
-    }));
+    });
   }
 
   async function fetchCatalog() {
@@ -89,19 +79,21 @@ function toast(msg, ms = 2200) {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       const items = data?.items || data?.rows || data?.data || data?.list || data || [];
-      renderRows(items.map(p => ({
-        sku: p.sku || p.code || p.id || '',
-        img: p.img || (Array.isArray(p.imgs) ? p.imgs[0] : ''),
+      const norm = items.map(p => ({
+        sku:   p.sku || p.code || p.id || '',
+        img:   p.img || (Array.isArray(p.imgs) ? p.imgs[0] : ''),
         title: p.title || p.name || p.desc || '',
         price: p.price || '',
-        url: p.url || p.link || '',
-      })));
-      window.__rowsForExport = items;
-      setStatus(`抓取完成：${items.length} 条`, true);
+        url:   p.url || p.link || '',
+      }));
+      window.__rowsForExport = norm;
+      renderRows(norm);
+      setStatus(`抓取完成（${norm.length} 条）`, true);
+      toast('抓取成功');
     } catch (e) {
       console.error(e);
       setStatus('抓取失败：' + (e?.message || e));
-      window.__rowsForExport = [];
+      toast('抓取失败');
     } finally {
       setBusy(false);
     }
@@ -109,7 +101,7 @@ function toast(msg, ms = 2200) {
 
   async function doExport() {
     const rows = window.__rowsForExport || [];
-    const url = (els.url?.value || '').trim();
+    const url   = (els.url?.value || '').trim();
     const limit = parseInt((els.limit?.value || '50'), 10) || 50;
 
     setBusy(true); setStatus('导出中…');
@@ -122,84 +114,22 @@ function toast(msg, ms = 2200) {
         setStatus('没有可以导出的数据'); return;
       }
       setStatus('已触发下载', true);
+      toast('已触发下载');
     } catch (e) {
       console.error(e);
       setStatus('导出失败：' + (e?.message || e));
+      toast('导出失败');
     } finally {
       setBusy(false);
     }
   }
 
-  // 绑定（极简必需）
-  if (els.btnFetch) els.btnFetch.addEventListener('click', fetchCatalog);
+  if (els.btnFetch)  els.btnFetch .addEventListener('click', fetchCatalog);
   if (els.btnExport) els.btnExport.addEventListener('click', doExport);
-  if (els.btnClear && els.tbody) els.btnClear.addEventListener('click', () => { els.tbody.innerHTML = ''; setStatus('已清空'); });
+  if (els.btnClear && els.tbody) els.btnClear.addEventListener('click', () => { els.tbody.innerHTML=''; setStatus('已清空'); });
 
   // 健康检查（非阻断）
-  (async () => { try { const r = await fetch(`${API_BASE}/health`); console.info('[health]', r.status); } catch {} })();
-
-  // ------- 增强：仅在 CFG.enhance = true 时启用（完全不影响极简路径） -------
-  if (!CFG.enhance) return;
-
-  // 1) 输入增强：自动补 http 前缀 / 回车即抓取 / 简单防抖
-  if (els.url) {
-    const ensureHttp = v => (/^https?:\/\//i.test(v) ? v : (v ? `https://${v}` : v));
-    let t = 0;
-    els.url.addEventListener('input', () => {
-      clearTimeout(t);
-      t = setTimeout(() => { els.url.value = els.url.value.trim(); }, 300);
-    });
-    els.url.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { els.url.value = ensureHttp(els.url.value.trim()); fetchCatalog(); }
-    });
-    els.btnFetch?.addEventListener('click', () => { els.url.value = ensureHttp(els.url.value.trim()); });
-  }
-
-  // 2) 键盘快捷键：Ctrl/Cmd+E 导出
-  window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') { e.preventDefault(); doExport(); }
-  });
-
-  // 3) 表头排序（点击 “货号 / 描述 / 单价” 列头）
-  if (els.thead && els.tbody) {
-    const idxMap = { sku: 1, title: 3, price: 4 };
-    [...els.thead.querySelectorAll('th')].forEach((th, i) => {
-      if (![idxMap.sku, idxMap.title, idxMap.price].includes(i)) return;
-      let asc = true;
-      th.style.cursor = 'pointer';
-      th.title = '点击排序';
-      th.addEventListener('click', () => {
-        const rows = Array.from(els.tbody.querySelectorAll('tr'));
-        rows.sort((a, b) => {
-          const av = a.children[i]?.textContent?.trim() || '';
-          const bv = b.children[i]?.textContent?.trim() || '';
-          const na = parseFloat(av.replace(/[^\d.]/g, ''));
-          const nb = parseFloat(bv.replace(/[^\d.]/g, ''));
-          const bothNum = !Number.isNaN(na) && !Number.isNaN(nb);
-          const res = bothNum ? (na - nb) : av.localeCompare(bv);
-          return asc ? res : -res;
-        });
-        els.tbody.innerHTML = ''; rows.forEach(r => els.tbody.appendChild(r));
-        asc = !asc;
-      });
-    });
-  }
-
-  // 4) 图片预览增强：移入放大
-  document.addEventListener('mouseover', (e) => {
-    const img = e.target.closest('img.thumb'); if (!img) return;
-    let pop = document.createElement('div');
-    pop.style.cssText = 'position:fixed;z-index:100000;border:1px solid #e5e7eb;background:#fff;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px;border-radius:8px;';
-    const large = new Image();
-    large.src = img.src; large.style.cssText = 'max-width:360px;max-height:360px;object-fit:contain;display:block;';
-    pop.appendChild(large);
-    document.body.appendChild(pop);
-    const move = (ev) => { pop.style.left = (ev.clientX + 16) + 'px'; pop.style.top = (ev.clientY + 16) + 'px'; };
-    const leave = () => { document.removeEventListener('mousemove', move); img.removeEventListener('mouseleave', leave); pop.remove(); };
-    document.addEventListener('mousemove', move); img.addEventListener('mouseleave', leave);
-  });
-
-  // 5) 成功/失败轻提示（基于 setStatus + toast）
-  const origSetStatus = setStatus;
-  setStatus = (m, ok = false) => { origSetStatus(m, ok); toast(m); }; // 覆盖本地闭包引用
+  (async () => {
+    try { const r = await fetch(`${API_BASE}/health`); console.info('[health]', r.status); } catch {}
+  })();
 })();
