@@ -1,4 +1,4 @@
-// /frontend/public/ui-enhance.js  (2025-11-05-final)
+// /frontend/public/ui-enhance.js  (final)
 // 仅做 UI/DOM 增强；所有网络调用统一走 getApiBase()/imageProxy()/export*，不写 /v1/* 直链。
 import { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } from '../../export-xlsx.js';
 
