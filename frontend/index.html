@@ -56,14 +56,13 @@
   <!-- 方案A：明确指定 export-xlsx.js 在 /frontend/export-xlsx.js -->
   <script>
     window.UI_ENHANCE = {
-      enhance: true,                 // 等价于在 URL 写 ?enhance=1 或 meta[name=ui-enhance]=on
-      exportModule: '../export-xlsx.js'  // 从 frontend/public/ 回到 frontend/，命中正确文件
+      enhance: true,                  // 等价 ?enhance=1 或 meta[name=ui-enhance]=on
+      exportModule: '../export-xlsx.js' // 从 frontend/public/ 回到 frontend/ 命中正确文件
     };
   </script>
 
-  <!-- 使用 plus 版本（默认增强打开）；如需回退到旧版 ui-enhance.js，请切换到下方注释行 -->
+  <!-- 使用 plus 版本；如需回退到旧版 ui-enhance.js，可改为下方注释行 -->
   <script type="module" src="./public/ui-enhance.plus.js?enhance=1"></script>
-  <!-- 回退行（仅备忘；一般不需要）： -->
-  <!-- <script type="module" src="./public/ui-enhance.js"></script> -->
+  <!-- 回退行（备忘）：<script type="module" src="./public/ui-enhance.js"></script> -->
 </body>
 </html>
