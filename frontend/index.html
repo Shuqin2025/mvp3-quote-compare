@@ -3,21 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 可用 ?api= 覆盖；否则读此 meta；再否则回退 /v1/api -->
   <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api" />
   <meta name="ui-enhance" content="on" />
   <title>云贸星 · 智能表格生成器</title>
 </head>
 <body>
-  <script>
-    window.UI_ENHANCE = {
-      enhance: true,
-      // 你把 export-xlsx.js 放在 frontend/public 下了，这里就不用再给路径；
-      // 具体导入在 ui-enhance.js 里用 ESM 一行搞定。
-    };
-  </script>
+  <!-- 只提供必要的 DOM。脚本负责增强与事件绑定。 -->
+  <div class="card-head">
+    <input id="txtUrl" placeholder="https://example.com/category/..." />
+    <input id="limit" style="max-width:140px" value="50" />
+    <button id="btnFetch">抓取目录</button>
+    <button id="btnExport">导出 Excel（.xlsx）</button>
+    <button id="btnClear">清空数据</button>
+  </div>
+  <div id="status">准备就绪</div>
+  <div id="okbar" style="display:none;"></div>
+  <table id="tbl">
+    <thead>
+      <tr><th>#</th><th>货号</th><th>图片</th><th>描述</th><th>单价</th><th>打开</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 
-  <!-- 关键：这里改为 ui-enhance.js（你仓库里存在的那个文件名） -->
-  <script type="module" src="./public/ui-enhance.js?enhance=1"></script>
+  <!-- 关键：启用 plus 版本，且用相对路径（相对 frontend/index.html 指向 frontend/public/*） -->
+  <script type="module" src="./public/ui-enhance.plus.js?enhance=1"></script>
 </body>
 </html>
-
