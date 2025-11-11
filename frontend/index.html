@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- 可用 ?api= 覆盖；否则读此 meta；再否则回退 /v1/api -->
   <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api" />
+  <!-- 可选：显式开启增强（与 ?enhance=1 等价）。若想默认关闭，把 content 改为 off 或删除本行。 -->
+  <meta name="ui-enhance" content="on" />
+
   <title>云贸星 · 智能表格生成器</title>
   <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
   <style>
@@ -50,7 +53,17 @@
     </div>
   </div>
 
-  <!-- 仅加载外部模块，避免内联脚本再被平台截断 -->
+  <!-- 方案A：明确指定 export-xlsx.js 在 /frontend/export-xlsx.js -->
+  <script>
+    window.UI_ENHANCE = {
+      enhance: true,                 // 等价于在 URL 写 ?enhance=1 或 meta[name=ui-enhance]=on
+      exportModule: '../export-xlsx.js'  // 从 frontend/public/ 回到 frontend/，命中正确文件
+    };
+  </script>
+
+  <!-- 使用 plus 版本（默认增强打开）；如需回退到旧版 ui-enhance.js，请切换到下方注释行 -->
   <script type="module" src="./public/ui-enhance.plus.js?enhance=1"></script>
+  <!-- 回退行（仅备忘；一般不需要）： -->
+  <!-- <script type="module" src="./public/ui-enhance.js"></script> -->
 </body>
 </html>
