@@ -22,7 +22,7 @@ function setStatus(msg, ok = false) {
 }
 
 // -------- 这里覆盖两个“易 404”的后端接口 --------
-// 统一走 /v1/api/*，避免被 export-xlsx.js 中的 getV1Root() 剪掉 /api 后变成 /v1/*
+// 统一走 /v1/api/*，避免被其它封装剪掉 /api 变成 /v1/*
 function imageProxy(url, format = 'raw') {
   const qs = new URLSearchParams({ url, format });
   return `${API_BASE}/image?${qs}`;
@@ -76,7 +76,6 @@ async function fetchCatalog() {
     const endpoint = `${API_BASE}/catalog/parse?${qs}`;
     const resp = await fetch(endpoint, { method: 'GET' });
     if (!resp.ok) {
-      // 直接把 404/500 等状态展示出来，便于你排查
       throw new Error(`抓取失败：HTTP ${resp.status}`);
     }
     const data = await resp.json();
@@ -108,7 +107,7 @@ async function doExport() {
   setStatus('导出中…');
   try {
     if (Array.isArray(rows) && rows.length > 0) {
-      // “就地导出”由后端直连图片更稳定，因此这里直接走后端 URL 导出
+      // 为了稳定，统一走后端 URL 导出（后端直连图片）
       await exportToXlsxByUrl(url || '_probe_', limit, { filename: 'catalog.xlsx' });
     } else if (url) {
       await exportToXlsxByUrl(url, limit, { filename: 'catalog.xlsx' });
@@ -148,7 +147,6 @@ async function healthProbe() {
 
 // -------- 启动 --------
 (function main() {
-  // 可选增强：如果 index.html 里关掉了 <meta name="ui-enhance" content="on"> 或 window.UI_ENHANCE.enhance=false，可在此 return；
   const meta = document.querySelector('meta[name="ui-enhance"]')?.content || '';
   const flag = (window.UI_ENHANCE?.enhance ?? meta === 'on');
   if (!flag) return;
