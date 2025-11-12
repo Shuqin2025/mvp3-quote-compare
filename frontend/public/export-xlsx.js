@@ -1,85 +1,86 @@
-// frontend/public/export-xlsx.js
-// 统一导出的小工具：获取 API Base、构造 URL、图片代理、导出 xlsx、目录抓取等。
+// --- export-xlsx.js --------------------------------------------------------
+// 统一导出：getApiBase / imageProxy / exportToXlsxByItems / exportToXlsxByUrl
+// 关键修复：任何 URL 拼接都使用 joinUrl 保证单个斜杠，避免 ...onrender.comcatalog 之类错误。
 
-/** 读取 ?api= 或 <meta name="api-base">；若都没有，默认同域 */
+/** 将 base 与 path 安全拼接：永远只有一个斜杠 */
+function joinUrl(base, path) {
+  const b = String(base || '').replace(/\/+$/g, '');
+  const p = String(path || '').replace(/^\/+/g, '');
+  return `${b}/${p}`;
+}
+
+/** 统一把相对 v1 路径补齐为 v1/* */
+function withV1(path) {
+  const p = String(path || '');
+  if (/^v1\//i.test(p)) return p;
+  return `v1/${p.replace(/^\/+/, '')}`;
+}
+
+/** 解析 URLSearchParams */
+function getSearchParams() {
+  try { return new URLSearchParams(location.search); }
+  catch { return new URLSearchParams(); }
+}
+
+/** 读取 <meta name="api-base"> */
+function getMetaApiBase() {
+  const meta = document.querySelector('meta[name="api-base"]');
+  return meta?.content?.trim() || '';
+}
+
+/** 计算 API Base：优先 ?api= ，然后 <meta> ，最后空串（同源） */
 export function getApiBase() {
-  try {
-    const u = new URL(window.location.href);
-    const override = u.searchParams.get('api') || '';
-    const meta = document.querySelector('meta[name="api-base"]')?.content || '';
-    const base = (override || meta || '').trim();
-    if (!base) return ''; // 同域
-    return base;
-  } catch (_) {
-    return '';
-  }
+  const qs = getSearchParams();
+  const fromQuery = (qs.get('api') || '').trim();           // 例如 https://yunivera-gateway.onrender.com
+  const fromMeta  = getMetaApiBase();                        // 例如 https://yunivera-gateway.onrender.com/v1/api
+  let base = fromQuery || fromMeta || '';
+
+  // 如果 meta 里给到的是带 /v1/api 的“完全前缀”，也没关系，后面统一按 joinUrl 处理
+  // 确保是绝对或相对都能用：空串意味着走同源
+  return base;
 }
 
-/** 规范化拼接：确保 base + '/v1/' + endpoint 之间只有一个斜杠 */
-function joinApi(base, endpoint) {
-  const b = (base || '').replace(/\/+$/g, '');      // 去掉 base 尾部斜杠
-  const ep = String(endpoint || '').replace(/^\/+/g, ''); // 去掉 endpoint 头部斜杠
-  // 强制加 /v1/。如果 base 已经是 /v1 结尾也无妨（上面已去重）
-  return `${b}/v1/${ep}`;
+/** 生成完整 API URL（自动补 v1/ 前缀、并安全拼接斜杠） */
+function apiUrl(path) {
+  const base = getApiBase();
+  return joinUrl(base || '', withV1(path));
 }
 
-/** 构造带查询串的 API URL */
-function buildApiUrl(base, endpoint, params = {}) {
-  const url = new URL(joinApi(base, endpoint));
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
-  });
-  return url.toString();
-}
-
-/** 图片代理：默认 raw（透传），也可 'webp' 等 */
+/** 图片代理地址（format: raw | webp | ...） */
 export function imageProxy(originalUrl, format = 'raw') {
-  const base = getApiBase();
-  return buildApiUrl(base, 'image', { format, url: originalUrl });
+  const u = apiUrl('image');
+  const q = `format=${encodeURIComponent(format)}&url=${encodeURIComponent(originalUrl || '')}`;
+  return `${u}?${q}`;
 }
 
-/** 从接口按 URL 抓取目录（后端：GET /v1/catalog/parse?url=...&limit=...） */
-export async function fetchCatalogByUrl(listUrl, limit = 50) {
-  const base = getApiBase();
-  const api = buildApiUrl(base, 'catalog/parse', { url: listUrl, limit });
-  const res = await fetch(api, { credentials: 'omit' });
-  if (!res.ok) throw new Error(`抓取失败：${res.status} ${res.statusText}`);
-  const json = await res.json();
-  return json;
-}
-
-/** 将列表导出为 xlsx（后端：POST /v1/export-xlsx，body: {items, filename}） */
-export async function exportToXlsxByItems(items = [], filename = '产品数据导出.xlsx') {
-  const base = getApiBase();
-  const api = buildApiUrl(base, 'export-xlsx');
-  const res = await fetch(api, {
+/** 由商品条目数组导出（POST JSON -> blob 下载） */
+export async function exportToXlsxByItems(items = [], filename = '商品数据导出.xlsx') {
+  const u = apiUrl('export-xlsx');
+  const res = await fetch(u, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ items, filename })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items })
   });
   if (!res.ok) throw new Error(`导出失败：${res.status} ${res.statusText}`);
-  // 返回文件流
   const blob = await res.blob();
-  return blob;
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
-/** 直接按 URL 让后端抓取并导出 xlsx（后端：GET /v1/export-xlsx?url=...&limit=...） */
-export async function exportToXlsxByUrl(listUrl, limit = 50, filename = '产品数据导出.xlsx') {
-  const base = getApiBase();
-  const api = buildApiUrl(base, 'export-xlsx', { url: listUrl, limit, filename });
-  const res = await fetch(api);
+/** 由目录 URL 直接导出（GET 触发下载） */
+export async function exportToXlsxByUrl(listUrl, limit = 50, filename = '商品数据导出.xlsx') {
+  const u = apiUrl('export-xlsx');
+  const qs = new URLSearchParams({ url: String(listUrl || ''), limit: String(limit || 50) });
+  const res = await fetch(`${u}?${qs.toString()}`, { method: 'GET' });
   if (!res.ok) throw new Error(`导出失败：${res.status} ${res.statusText}`);
+
+  // 有些后端会直接以 attachment 响应；兜底为 blob 下载
   const blob = await res.blob();
-  return blob;
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
-/** 小工具：把一条 item 映射成渲染用的行数据（容错空字段） */
-export function mapItemToRow(item = {}) {
-  return {
-    sku: item.sku || '',
-    title: item.title || item.desc || '',
-    price: item.price || '',
-    url: item.url || '#',
-    img: item.img || ''
-  };
-}
+// 供其它模块使用（少量工具）
+export const _util = { joinUrl, withV1, apiUrl };
