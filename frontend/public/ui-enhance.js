@@ -1,157 +1,105 @@
-// 文件：frontend/public/ui-enhance.plus.js
-// 说明：保持“极简 + 可选增强开关”，但在此处强制修正图片代理与后端导出两个接口到 /v1/api/*。
-// 仅依赖：同目录下的 export-xlsx.js 提供 getApiBase()
+// /frontend/public/ui-enhance.js  (fixed import path)
+// 仅做 UI/DOM 增强；所有网络调用统一走 getApiBase()/imageProxy()/export*，不写 /v1/* 直链。
+import { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } from './export-xlsx.js';
 
-import { getApiBase } from './export-xlsx.js';
+(() => {
+  const $ = (s, r=document) => r.querySelector(s);
+  const API_BASE = getApiBase();
 
-// -------- 工具 --------
-const $ = (s, r = document) => r.querySelector(s);
-const API_BASE = getApiBase(); // 读取 <meta name="api-base"> 或 ?api= 覆盖，返回 .../v1/api
+  const els = {
+    url: $('#txtUrl') || $('#url') || $('input[type="url"]') || $('input'),
+    limit: $('#limit') || $('#selLimit') || $('select'),
+    btnFetch: $('#btnFetch'),
+    btnExport: $('#btnExport'),
+    btnClear: $('#btnClear'),
+    status: $('#status') || $('.alert') || null,
+    okbar: $('#okbar') || null,
+    tbody: $('#tbl tbody') || $('tbody'),
+  };
 
-function setBusy(on) {
-  const els = ['#txtUrl', '#limit', '#btnFetch', '#btnExport', '#btnClear']
-    .map(s => $(s)).filter(Boolean);
-  els.forEach(el => el.disabled = !!on);
-  document.body.style.cursor = on ? 'progress' : 'default';
-}
-function setStatus(msg, ok = false) {
-  const status = $('#status');
-  const okbar = $('#okbar');
-  if (status) { status.textContent = msg; status.style.display = 'block'; }
-  if (okbar) { okbar.textContent = msg; okbar.style.display = ok ? 'block' : 'none'; }
-}
-
-// -------- 这里覆盖两个“易 404”的后端接口 --------
-// 统一走 /v1/api/*，避免被其它封装剪掉 /api 变成 /v1/*
-function imageProxy(url, format = 'raw') {
-  const qs = new URLSearchParams({ url, format });
-  return `${API_BASE}/image?${qs}`;
-}
-async function exportToXlsxByUrl(url, limit = 50, opts = {}) {
-  const qs = new URLSearchParams({ url, limit: String(limit) });
-  const endpoint = `${API_BASE}/export-xlsx?${qs}`;
-  const res = await fetch(endpoint, { method: 'GET' });
-  if (!res.ok) throw new Error(`导出失败：HTTP ${res.status}`);
-  // 文件下载
-  const blob = await res.blob();
-  const fname = opts.filename || 'catalog.xlsx';
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = fname;
-  document.body.appendChild(a);
-  a.click();
-  URL.revokeObjectURL(a.href);
-  a.remove();
-}
-
-// -------- 渲染 & 采集 --------
-function renderRows(items = []) {
-  const tbody = $('#tbl tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-  items.forEach((it, i) => {
-    const tr = document.createElement('tr');
-    const img = it.img ? `<img class="thumb" src="${imageProxy(it.img, 'raw')}" alt=""/>` : '';
-    tr.innerHTML = `
-      <td>${i + 1}</td>
-      <td>${it.sku || ''}</td>
-      <td>${img}</td>
-      <td>${it.title || it.desc || ''}</td>
-      <td>${it.price || ''}</td>
-      <td>${it.url ? `<a href="${it.url}" target="_blank" rel="noreferrer">打开</a>` : ''}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-async function fetchCatalog() {
-  const url = ($('#txtUrl')?.value || '').trim();
-  const limit = parseInt($('#limit')?.value || '50', 10) || 50;
-  if (!url) { setStatus('请输入目录链接'); return; }
-
-  setBusy(true);
-  setStatus('抓取中…');
-  try {
-    const qs = new URLSearchParams({ url, limit: String(limit) });
-    const endpoint = `${API_BASE}/catalog/parse?${qs}`;
-    const resp = await fetch(endpoint, { method: 'GET' });
-    if (!resp.ok) {
-      throw new Error(`抓取失败：HTTP ${resp.status}`);
-    }
-    const data = await resp.json();
-    const list = data?.items || data?.rows || data?.data || data?.list || [];
-    const norm = list.map(p => ({
-      sku: p.sku || p.code || p.id || '',
-      img: p.img || (Array.isArray(p.imgs) ? p.imgs[0] : ''),
-      title: p.title || p.name || p.desc || '',
-      price: p.price || '',
-      url: p.url || p.link || ''
-    }));
-    window.__rowsForExport = norm;
-    renderRows(norm);
-    setStatus(`抓取完成：${norm.length} 条`, true);
-  } catch (e) {
-    console.error(e);
-    setStatus(e?.message || '抓取失败');
-  } finally {
-    setBusy(false);
+  function setBusy(b) {
+    [els.url, els.limit, els.btnFetch, els.btnExport, els.btnClear].forEach(el => { if (el) el.disabled = !!b; });
+    document.body.style.cursor = b ? 'progress' : 'default';
   }
-}
-
-async function doExport() {
-  const rows = window.__rowsForExport || [];
-  const url = ($('#txtUrl')?.value || '').trim();
-  const limit = parseInt($('#limit')?.value || '50', 10) || 50;
-
-  setBusy(true);
-  setStatus('导出中…');
-  try {
-    if (Array.isArray(rows) && rows.length > 0) {
-      // 为了稳定，统一走后端 URL 导出（后端直连图片）
-      await exportToXlsxByUrl(url || '_probe_', limit, { filename: 'catalog.xlsx' });
-    } else if (url) {
-      await exportToXlsxByUrl(url, limit, { filename: 'catalog.xlsx' });
-    } else {
-      setStatus('没有可以导出的数据'); 
-      return;
-    }
-    setStatus('已触发下载', true);
-  } catch (e) {
-    console.error(e);
-    setStatus(e?.message || '导出失败');
-  } finally {
-    setBusy(false);
+  function setStatus(msg, ok=false) {
+    if (els.status) { els.status.textContent = msg; els.status.style.display='block'; }
+    if (els.okbar) { els.okbar.textContent = msg; els.okbar.style.display = ok ? 'block' : 'none'; }
   }
-}
 
-// -------- 事件 & 健康探针 --------
-function bindEvents() {
-  $('#btnFetch')?.addEventListener('click', fetchCatalog);
-  $('#btnExport')?.addEventListener('click', doExport);
-  $('#btnClear')?.addEventListener('click', () => {
-    const tbody = $('#tbl tbody');
-    if (tbody) tbody.innerHTML = '';
-    window.__rowsForExport = [];
-    setStatus('已清空');
-  });
-}
+  function renderRows(items=[]) {
+    if (!els.tbody) return;
+    els.tbody.innerHTML = '';
+    items.forEach((it, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${i+1}</td>
+        <td>${it.sku || ''}</td>
+        <td>${it.img ? `<img class="thumb" src="${imageProxy(it.img,'raw')}" alt="" />` : ''}</td>
+        <td>${it.title || it.desc || ''}</td>
+        <td>${it.price || ''}</td>
+        <td>${it.url ? `<a href="${it.url}" target="_blank" rel="noreferrer">打开</a>` : ''}</td>
+      `;
+      els.tbody.appendChild(tr);
+    });
+  }
 
-async function healthProbe() {
-  try {
-    // /v1/api/health（API层），以及 /v1/health（网关层）都试探一下，非阻断
-    await fetch(`${API_BASE}/health`).catch(() => {});
-    const root = API_BASE.replace(/\/api\/?$/, '/'); // 网关根：.../v1/
-    await fetch(`${root}health`).catch(() => {});
-  } catch {}
-}
+  async function fetchCatalog() {
+    const url = (els.url?.value || '').trim();
+    const limit = parseInt((els.limit?.value || '50'), 10) || 50;
+    if (!url) { setStatus('请输入目录链接'); return; }
+    setBusy(true); setStatus('抓取中…');
+    try {
+      const qs = new URLSearchParams({ url, limit: String(limit) });
+      const resp = await fetch(`${API_BASE}/catalog/parse?${qs.toString()}`, { method:'GET' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const items = data?.items || data?.rows || data?.data || data?.list || data || [];
+      const norm = items.map(p => ({
+        sku: p.sku || p.code || p.id || '',
+        img: p.img || (Array.isArray(p.imgs)?p.imgs[0]:''),
+        title: p.title || p.name || p.desc || '',
+        price: p.price || '',
+        url: p.url || p.link || '',
+      }));
+      renderRows(norm);
+      window.__rowsForExport = norm;
+      setStatus('抓取完成', true);
+    } catch (e) {
+      console.error(e);
+      setStatus('抓取失败：' + (e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
-// -------- 启动 --------
-(function main() {
-  const meta = document.querySelector('meta[name="ui-enhance"]')?.content || '';
-  const flag = (window.UI_ENHANCE?.enhance ?? meta === 'on');
-  if (!flag) return;
+  async function doExport() {
+    const rows = window.__rowsForExport || [];
+    const url = (els.url?.value || '').trim();
+    const limit = parseInt((els.limit?.value || '50'), 10) || 50;
 
-  bindEvents();
-  healthProbe();
-  setStatus('准备就绪');
+    setBusy(true); setStatus('导出中…');
+    try {
+      if (Array.isArray(rows) && rows.length > 0) {
+        await exportToXlsxByItems({ items: rows, withImages:true, filename:'catalog.xlsx' });
+      } else if (url) {
+        await exportToXlsxByUrl({ url, limit, withImages:true, filename:'catalog.xlsx' });
+      } else {
+        setStatus('没有可以导出的数据'); return;
+      }
+      setStatus('已触发下载', true);
+    } catch (e) {
+      console.error(e);
+      setStatus('导出失败：' + (e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (els.btnFetch) els.btnFetch.addEventListener('click', fetchCatalog);
+  if (els.btnExport) els.btnExport.addEventListener('click', doExport);
+  if (els.btnClear && els.tbody) els.btnClear.addEventListener('click', () => { els.tbody.innerHTML=''; setStatus('已清空'); });
+
+  (async () => {
+    try { const r = await fetch(`${API_BASE}/health`); console.info('[health]', r.status); } catch {}
+  })();
 })();
