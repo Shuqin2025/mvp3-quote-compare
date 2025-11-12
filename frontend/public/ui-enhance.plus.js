@@ -1,161 +1,251 @@
-/* frontend/public/ui-enhance.plus.js
- * 负责页面交互：抓取目录、渲染表格、图片代理回退、语言按钮、本地存储语言等
+/* ui-enhance.plus.js  —  FE 简化增强（方案A）
+ * 1) 解析目录：GET  /v1/catalog/parse?url&limit
+ * 2) 图片加载：先直连原图，失败再 POST /v1/image 代理
+ * 3) 导出：由 export-xlsx.js 统一处理（POST /v1/export-xlsx -> fallback CSV）
+ * 4) 语言切换与状态提示
  */
 
-(function () {
-  const qs = (s, el = document) => el.querySelector(s);
-  const qsa = (s, el = document) => [...el.querySelectorAll(s)];
-  const $url = qs('#txtUrl') || qs('#txtInput') || qs('input[type="text"]');
-  const $limit = qs('#txtLimit') || qs('input[type="number"]');
-  const $btnFetch = qs('#btnFetch');
-  const $btnClear = qs('#btnClear');
-  const $btnExport = qs('#btnExport');
-  const $table = qs('#tbl') || qs('table');
-  const $tbody = qs('#tb1') || qs('tbody');
-  const $status = qs('#status');
-  const $okbar = qs('#okbar');
+(() => {
+  const $ = (sel, el = document) => el.querySelector(sel);
+  const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
 
-  // 读取 ?api= 指定的网关根
-  const search = new URLSearchParams(location.search);
-  let apiBase = (search.get('api') || '').trim();
-  if (apiBase.endsWith('/')) apiBase = apiBase.replace(/\/+$/, '');
-  const api = (p) => `${apiBase}/v1${p}`;
+  // ---- runtime ----
+  const urlParams = new URLSearchParams(location.search);
+  const apiFromQuery = urlParams.get('api');
+  const apiBase = (apiFromQuery && apiFromQuery.trim()) ||
+                  (window.UI_API_BASE || 'https://yunivera-gateway.onrender.com');
 
-  // 语言
-  const langKey = 'mvp_lang';
-  const lang = localStorage.getItem(langKey) || 'zh';
+  console.log('[ui-plus] enabled, apiBase =', apiBase);
 
-  // UI 状态
-  const setStatus = (msg, kind = 'info') => {
-    if ($status) {
-      $status.className = `alert ${kind}`;
-      $status.textContent = msg;
-    }
-  };
-  const setOk = (msg) => {
-    if ($okbar) {
-      $okbar.style.display = 'block';
-      $okbar.textContent = msg || 'ok';
-    }
+  // UI 节点
+  const elInput = $('#txtUrl') || $('#txtUrl, input[type="text"]') || $('input[type="text"]');
+  const elLimit = $('#txtLimit') || $('input[type="number"]');
+  const btnFetch = $('#btnFetch') || $('button.btn-primary');
+  const btnExport = $('#btnExport') || $('button:nth-of-type(2)');
+  const btnClear = $('#btnClear') || $('button:nth-of-type(3)');
+  const elStatus = $('#status');
+  const elOkbar = $('#okbar');
+  const elBody = $('#tbl tbody') || $('#tbl').querySelector('tbody');
+
+  // state
+  const state = {
+    sourceUrl: '',
+    baseHref: '',
+    limit: 50,
+    rows: []
   };
 
-  // 图片 URL 生成：代理优先，失败回退
-  const proxied = (rawUrl) => api(`/image?format=raw&url=${encodeURIComponent(rawUrl)}`);
+  // ---- helpers ----
+  const setStatus = (msg, type = 'info') => {
+    if (!elStatus) return;
+    elStatus.className = `status alert ${type}`;
+    elStatus.textContent = msg || '';
+  };
+  const setOkbar = (msg) => {
+    if (!elOkbar) return;
+    elOkbar.style.display = msg ? 'block' : 'none';
+    elOkbar.textContent = msg || '';
+  };
 
-  // 渲染一行
-  function renderRow(i, item) {
-    const tr = document.createElement('tr');
-    const tdIndex = document.createElement('td');
-    tdIndex.textContent = i + 1;
-
-    const tdBrand = document.createElement('td');
-    tdBrand.textContent = item.brand || item.manu || item.vendor || item.supplier || item.shop || '';
-
-    const tdImg = document.createElement('td');
-    const img = document.createElement('img');
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.style.cssText = 'width:64px;height:64px;object-fit:contain;background:#fff;border:1px solid #eee;border-radius:4px;';
-    // 先走代理，失败回退直链
-    if (item.img) {
-      img.src = proxied(item.img);
-      img.onerror = () => { img.onerror = null; img.src = item.img; };
-    } else {
-      img.alt = 'no-image';
+  const toAbsolute = (maybeRelative, baseHref) => {
+    if (!maybeRelative) return '';
+    try {
+      // 已是绝对
+      const u = new URL(maybeRelative);
+      return u.href;
+    } catch {
+      try {
+        const u = new URL(maybeRelative, baseHref);
+        return u.href;
+      } catch {
+        return maybeRelative;
+      }
     }
-    tdImg.appendChild(img);
+  };
 
-    const tdTitle = document.createElement('td');
-    tdTitle.textContent = item.title || item.name || item.desc || '';
+  const buildBaseHref = (pageUrl) => {
+    try {
+      const u = new URL(pageUrl);
+      return `${u.protocol}//${u.host}/`;
+    } catch {
+      return pageUrl;
+    }
+  };
 
-    const tdPrice = document.createElement('td');
-    tdPrice.textContent = item.price || '';
+  const clearTable = () => {
+    if (elBody) elBody.innerHTML = '';
+    state.rows = [];
+    setOkbar('');
+  };
 
-    const tdOpen = document.createElement('td');
-    const a = document.createElement('a');
-    a.href = item.url || '#';
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.textContent = lang === 'de' ? 'öffnen' : lang === 'en' ? 'open' : '打开';
-    tdOpen.appendChild(a);
+  // 图片加载：优先直连，失败 fallback 到网关代理
+  const loadImgWithFallback = (imgEl, srcUrl) => {
+    imgEl.src = srcUrl;
+    let triedProxy = false;
 
-    tr.appendChild(tdIndex);
-    tr.appendChild(tdBrand);
-    tr.appendChild(tdImg);
-    tr.appendChild(tdTitle);
-    tr.appendChild(tdPrice);
-    tr.appendChild(tdOpen);
-    return tr;
-  }
+    imgEl.onerror = async () => {
+      if (triedProxy) return;
+      triedProxy = true;
+      try {
+        const proxied = await proxyImage(srcUrl);
+        imgEl.src = proxied;
+      } catch (e) {
+        // 代理也失败，就用一个透明像素兜底
+        imgEl.src =
+          'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+      }
+    };
+  };
+
+  // 调用网关图片代理（POST /v1/image 返回 raw）
+  const proxyImage = async (src) => {
+    const resp = await fetch(`${apiBase}/v1/image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: src, format: 'raw' })
+    });
+    if (!resp.ok) throw new Error(`image proxy ${resp.status}`);
+    const blob = await resp.blob();
+    return URL.createObjectURL(blob);
+  };
 
   // 渲染表格
-  function renderTable(rows = []) {
-    if (!$tbody) return;
-    $tbody.innerHTML = '';
-    rows.forEach((it, idx) => $tbody.appendChild(renderRow(idx, it)));
-  }
+  const renderRows = (rows, baseHref) => {
+    if (!elBody) return;
+    elBody.innerHTML = '';
 
-  // 抓取目录
-  async function fetchCatalog() {
+    rows.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+
+      const tdIdx = document.createElement('td');
+      tdIdx.textContent = (idx + 1).toString();
+      tr.appendChild(tdIdx);
+
+      const tdSku = document.createElement('td');
+      tdSku.textContent = (row.sku || row.title || `#${idx + 1}`).toString();
+      tr.appendChild(tdSku);
+
+      const tdImg = document.createElement('td');
+      const img = document.createElement('img');
+      img.width = 64; img.height = 64; img.loading = 'lazy';
+      const imgUrl = toAbsolute(row.img, baseHref);
+      // 先直连；失败再代理
+      loadImgWithFallback(img, imgUrl);
+      tdImg.appendChild(img);
+      tr.appendChild(tdImg);
+
+      const tdDesc = document.createElement('td');
+      tdDesc.textContent = row.desc || row.title || '';
+      tr.appendChild(tdDesc);
+
+      const tdPrice = document.createElement('td');
+      tdPrice.textContent = row.price || '';
+      tr.appendChild(tdPrice);
+
+      const tdOpen = document.createElement('td');
+      const a = document.createElement('a');
+      a.href = toAbsolute(row.url || row.href || '#', baseHref);
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = (window.UI_I18N_OPEN || 'open');
+      tdOpen.appendChild(a);
+      tr.appendChild(tdOpen);
+
+      elBody.appendChild(tr);
+    });
+  };
+
+  // 拉取目录
+  const fetchCatalog = async () => {
+    const srcUrl = (elInput && elInput.value || '').trim();
+    const limit = parseInt(elLimit && elLimit.value || '50', 10) || 50;
+    if (!srcUrl) {
+      setStatus('请输入目录页链接', 'warning');
+      return;
+    }
+    setStatus('抓取中…', 'info');
+    setOkbar('');
+
     try {
-      const url = ($url && $url.value || '').trim();
-      const limit = parseInt(($limit && $limit.value) || '50', 10) || 50;
-      if (!url) {
-        setStatus('请输入目录链接', 'warn');
-        return;
+      const qs = new URLSearchParams({ url: srcUrl, limit: String(limit) });
+      const resp = await fetch(`${apiBase}/v1/catalog/parse?${qs.toString()}`, {
+        method: 'GET',
+        credentials: 'omit',
+        mode: 'cors'
+      });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
       }
-      setStatus('正在抓取…', 'info');
+      const json = await resp.json();
 
-      const u = new URL(api('/catalog/parse'));
-      u.searchParams.set('url', url);
-      u.searchParams.set('limit', String(limit));
+      // 兼容字段
+      const baseHref = buildBaseHref(json.url || srcUrl);
+      const rows = Array.isArray(json.rows)
+        ? json.rows
+        : (Array.isArray(json.list) ? json.list : (Array.isArray(json.items) ? json.items : []));
 
-      const resp = await fetch(u.toString(), { method: 'GET' });
-      const ct = resp.headers.get('content-type') || '';
-      if (!resp.ok) throw new Error(`抓取失败（${resp.status}）`);
-      const data = ct.includes('application/json') ? await resp.json() : await resp.json();
+      state.sourceUrl = srcUrl;
+      state.baseHref = baseHref;
+      state.limit = limit;
+      state.rows = rows || [];
 
-      // 兼容服务字段：items / data / list / rows
-      const rows = data.rows || data.items || data.list || data.data || [];
-      renderTable(rows);
-      setOk(`Fetched: ${rows.length}/${data.count ?? rows.length}`);
-      setStatus('Ready', 'ok');
+      renderRows(state.rows, state.baseHref);
+      setStatus('Ready', 'success');
+      setOkbar(`Fetched: ${state.rows.length}/${limit}`);
     } catch (err) {
       console.error(err);
-      setStatus(`抓取失败：${err.message}`, 'error');
+      setStatus(`抓取失败：${err.message || err}`, 'warning');
     }
-  }
+  };
 
-  // 清空表格
-  function clearAll() {
-    if ($tbody) $tbody.innerHTML = '';
-    setStatus('');
-    if ($okbar) $okbar.style.display = 'none';
-  }
+  // 导出
+  const doExport = async () => {
+    if (!state.rows.length) {
+      setStatus('没有可导出的数据', 'warning');
+      return;
+    }
+    setStatus('正在导出…', 'info');
 
-  // 语言按钮（与 index.html 中 id 对应）
-  function bindLangButtons() {
-    const map = { '#btnLangZh': 'zh', '#btnLangDe': 'de', '#btnLangEn': 'en' };
-    Object.entries(map).forEach(([sel, code]) => {
-      const el = qs(sel);
-      if (el) el.addEventListener('click', () => {
-        localStorage.setItem(langKey, code);
-        location.reload();
+    try {
+      const mod = await import('./export-xlsx.js');
+      await mod.exportXlsx({
+        apiBase,
+        fromUrl: state.sourceUrl,
+        limit: state.limit,
+        rows: state.rows.map(r => ({
+          sku: r.sku || '',
+          img: toAbsolute(r.img || '', state.baseHref),
+          title: r.title || r.desc || '',
+          desc: r.desc || '',
+          price: r.price || '',
+          url: toAbsolute(r.url || r.href || '', state.baseHref)
+        }))
       });
-    });
+      setStatus('导出完成', 'success');
+    } catch (err) {
+      console.error(err);
+      setStatus(`导出失败：${err.message || err}`, 'warning');
+    }
+  };
+
+  // 绑定事件
+  btnFetch && btnFetch.addEventListener('click', fetchCatalog);
+  btnExport && btnExport.addEventListener('click', doExport);
+  btnClear && btnClear.addEventListener('click', () => {
+    clearTable();
+    setStatus('已清空', 'info');
+  });
+
+  // 语言切换（保持你之前的三语逻辑）
+  const lang = localStorage.getItem('mvp_lang') || 'zh';
+  window.UI_I18N_OPEN = (lang === 'zh') ? '打开' : (lang === 'de' ? 'Öffnen' : 'open');
+
+  // 如果地址栏已有 url&limit，自动触发一次
+  const autoUrl = urlParams.get('url');
+  if (autoUrl && elInput) {
+    elInput.value = autoUrl;
+    const aLimit = parseInt(urlParams.get('limit') || '50', 10) || 50;
+    if (elLimit) elLimit.value = String(aLimit);
+    fetchCatalog();
   }
-
-  // 绑定
-  if ($btnFetch) $btnFetch.addEventListener('click', fetchCatalog);
-  if ($btnClear) $btnClear.addEventListener('click', clearAll);
-  if ($btnExport && window.__EXPORT_XLSX__) {
-    $btnExport.addEventListener('click', () => window.__EXPORT_XLSX__.exportXlsx());
-  }
-  bindLangButtons();
-
-  // 对外暴露（调试用）
-  window.uiPlus = { apiBase, api, fetchCatalog };
-
-  // 控制台提示
-  console.log('[ui-plus] enabled, apiBase =', apiBase || '(same-origin)');
 })();
