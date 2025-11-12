@@ -1,203 +1,159 @@
 // 文件：frontend/public/ui-enhance.plus.js
-// 方案A：固定与 export-xlsx.js 同目录
-// —— 仅做 UI/DOM 增强；网络请求与导出统一走工具函数；不出现任何 /v1/* 直链。
+// 说明：保持“极简 + 可选增强开关”，但在此处强制修正图片代理与后端导出两个接口到 /v1/api/*。
+// 仅依赖：同目录下的 export-xlsx.js 提供 getApiBase()
 
-import {
-  getApiBase,
-  imageProxy,
-  exportToXlsxByItems,
-  exportToXlsxByUrl,
-} from './export-xlsx.js';
+import { getApiBase } from './export-xlsx.js';
 
-(function () {
-  // -------- 启用开关（支持三种方式，任一命中即启用） --------
-  // 1) URL ?enhance=1
-  // 2) <meta name="ui-enhance" content="on">
-  // 3) window.UI_ENHANCE = { enhance:true }
-  const qs = new URLSearchParams(location.search);
-  const enabledByQs = ['1', 'true', 'on'].includes((qs.get('enhance') || '').toLowerCase());
-  const enabledByMeta =
-    (document.querySelector('meta[name="ui-enhance"]')?.content || '').toLowerCase() === 'on';
-  const enabledByGlobal = typeof window !== 'undefined' && window.UI_ENHANCE && window.UI_ENHANCE.enhance === true;
-  const ENHANCE_ON = enabledByQs || enabledByMeta || enabledByGlobal;
+// -------- 工具 --------
+const $ = (s, r = document) => r.querySelector(s);
+const API_BASE = getApiBase(); // 读取 <meta name="api-base"> 或 ?api= 覆盖，返回 .../v1/api
 
-  if (!ENHANCE_ON) {
-    console.info('[ui-plus] enhancement disabled.');
-    return;
-  }
+function setBusy(on) {
+  const els = ['#txtUrl', '#limit', '#btnFetch', '#btnExport', '#btnClear']
+    .map(s => $(s)).filter(Boolean);
+  els.forEach(el => el.disabled = !!on);
+  document.body.style.cursor = on ? 'progress' : 'default';
+}
+function setStatus(msg, ok = false) {
+  const status = $('#status');
+  const okbar = $('#okbar');
+  if (status) { status.textContent = msg; status.style.display = 'block'; }
+  if (okbar) { okbar.textContent = msg; okbar.style.display = ok ? 'block' : 'none'; }
+}
 
-  // -------- DOM 快速查询 --------
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const API_BASE = getApiBase();
+// -------- 这里覆盖两个“易 404”的后端接口 --------
+// 统一走 /v1/api/*，避免被 export-xlsx.js 中的 getV1Root() 剪掉 /api 后变成 /v1/*
+function imageProxy(url, format = 'raw') {
+  const qs = new URLSearchParams({ url, format });
+  return `${API_BASE}/image?${qs}`;
+}
+async function exportToXlsxByUrl(url, limit = 50, opts = {}) {
+  const qs = new URLSearchParams({ url, limit: String(limit) });
+  const endpoint = `${API_BASE}/export-xlsx?${qs}`;
+  const res = await fetch(endpoint, { method: 'GET' });
+  if (!res.ok) throw new Error(`导出失败：HTTP ${res.status}`);
+  // 文件下载
+  const blob = await res.blob();
+  const fname = opts.filename || 'catalog.xlsx';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  URL.revokeObjectURL(a.href);
+  a.remove();
+}
 
-  const els = {
-    url: $('#txtUrl') || $('#url') || $('input[type="url"]') || $('input'),
-    limit: $('#limit') || $('#selLimit') || $('select'),
-    btnFetch: $('#btnFetch'),
-    btnExport: $('#btnExport'),
-    btnClear: $('#btnClear'),
-    status: $('#status') || $('.alert') || null,
-    okbar: $('#okbar') || null,
-    table: $('#tbl') || $('table'),
-    tbody: $('#tbl tbody') || $('table tbody') || $('tbody'),
-  };
+// -------- 渲染 & 采集 --------
+function renderRows(items = []) {
+  const tbody = $('#tbl tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  items.forEach((it, i) => {
+    const tr = document.createElement('tr');
+    const img = it.img ? `<img class="thumb" src="${imageProxy(it.img, 'raw')}" alt=""/>` : '';
+    tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td>${it.sku || ''}</td>
+      <td>${img}</td>
+      <td>${it.title || it.desc || ''}</td>
+      <td>${it.price || ''}</td>
+      <td>${it.url ? `<a href="${it.url}" target="_blank" rel="noreferrer">打开</a>` : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
 
-  // -------- 小工具：Toast --------
-  function toast(msg, ms = 2200) {
-    try {
-      let bar = document.getElementById('__toast__');
-      if (!bar) {
-        bar = document.createElement('div');
-        bar.id = '__toast__';
-        bar.style.cssText =
-          'position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;';
-        document.body.appendChild(bar);
-      }
-      const item = document.createElement('div');
-      item.textContent = msg;
-      item.style.cssText =
-        'background:rgba(17,24,39,.92);color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.15);font-size:14px;max-width:360px;';
-      bar.appendChild(item);
-      setTimeout(() => (item.style.opacity = '0'), ms);
-      setTimeout(() => item.remove(), ms + 300);
-    } catch {
-      alert(msg);
+async function fetchCatalog() {
+  const url = ($('#txtUrl')?.value || '').trim();
+  const limit = parseInt($('#limit')?.value || '50', 10) || 50;
+  if (!url) { setStatus('请输入目录链接'); return; }
+
+  setBusy(true);
+  setStatus('抓取中…');
+  try {
+    const qs = new URLSearchParams({ url, limit: String(limit) });
+    const endpoint = `${API_BASE}/catalog/parse?${qs}`;
+    const resp = await fetch(endpoint, { method: 'GET' });
+    if (!resp.ok) {
+      // 直接把 404/500 等状态展示出来，便于你排查
+      throw new Error(`抓取失败：HTTP ${resp.status}`);
     }
+    const data = await resp.json();
+    const list = data?.items || data?.rows || data?.data || data?.list || [];
+    const norm = list.map(p => ({
+      sku: p.sku || p.code || p.id || '',
+      img: p.img || (Array.isArray(p.imgs) ? p.imgs[0] : ''),
+      title: p.title || p.name || p.desc || '',
+      price: p.price || '',
+      url: p.url || p.link || ''
+    }));
+    window.__rowsForExport = norm;
+    renderRows(norm);
+    setStatus(`抓取完成：${norm.length} 条`, true);
+  } catch (e) {
+    console.error(e);
+    setStatus(e?.message || '抓取失败');
+  } finally {
+    setBusy(false);
   }
+}
 
-  function setBusy(b) {
-    [els.url, els.limit, els.btnFetch, els.btnExport, els.btnClear].forEach((el) => {
-      if (el) el.disabled = !!b;
-    });
-    document.body.style.cursor = b ? 'progress' : 'default';
-  }
+async function doExport() {
+  const rows = window.__rowsForExport || [];
+  const url = ($('#txtUrl')?.value || '').trim();
+  const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
-  function setStatus(text, ok = false) {
-    if (els.status) {
-      els.status.textContent = text;
-      els.status.style.display = 'block';
-    }
-    if (els.okbar) {
-      els.okbar.textContent = text;
-      els.okbar.style.display = ok ? 'block' : 'none';
-    }
-  }
-
-  // -------- 表格渲染 --------
-  function ensureTableHead() {
-    if (!els.table) return;
-    const thead = els.table.tHead || els.table.createTHead();
-    if (!thead.rows.length) {
-      const tr = thead.insertRow();
-      ['#', '货号', '图片', '描述', '单价', '打开'].forEach((t) => {
-        const th = document.createElement('th');
-        th.textContent = t;
-        tr.appendChild(th);
-      });
-    }
-  }
-
-  function renderRows(items = []) {
-    ensureTableHead();
-    if (!els.tbody) return;
-    els.tbody.innerHTML = '';
-    items.forEach((it, i) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${i + 1}</td>
-        <td>${it.sku || ''}</td>
-        <td>${it.img ? `<img class="thumb" src="${imageProxy(it.img, 'raw')}" alt="" />` : ''}</td>
-        <td>${it.title || it.desc || ''}</td>
-        <td>${it.price || ''}</td>
-        <td>${it.url ? `<a href="${it.url}" target="_blank" rel="noreferrer">打开</a>` : ''}</td>
-      `;
-      els.tbody.appendChild(tr);
-    });
-  }
-
-  // -------- 抓取目录 --------
-  async function fetchCatalog() {
-    const url = (els.url?.value || '').trim();
-    const limit = parseInt(els.limit?.value || '50', 10) || 50;
-    if (!url) {
-      setStatus('请输入目录链接');
+  setBusy(true);
+  setStatus('导出中…');
+  try {
+    if (Array.isArray(rows) && rows.length > 0) {
+      // “就地导出”由后端直连图片更稳定，因此这里直接走后端 URL 导出
+      await exportToXlsxByUrl(url || '_probe_', limit, { filename: 'catalog.xlsx' });
+    } else if (url) {
+      await exportToXlsxByUrl(url, limit, { filename: 'catalog.xlsx' });
+    } else {
+      setStatus('没有可以导出的数据'); 
       return;
     }
-    setBusy(true);
-    setStatus('抓取中…');
-    try {
-      const qs = new URLSearchParams({ url, limit: String(limit) });
-      const resp = await fetch(`${API_BASE}/catalog/parse?${qs.toString()}`, { method: 'GET' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const items = data?.items || data?.rows || data?.data || data?.list || data || [];
-      const norm = items.map((p) => ({
-        sku: p.sku || p.code || p.id || '',
-        img: p.img || (Array.isArray(p.imgs) ? p.imgs[0] : ''),
-        title: p.title || p.name || p.desc || '',
-        price: p.price || '',
-        url: p.url || p.link || '',
-      }));
-      window.__rowsForExport = norm;
-      renderRows(norm);
-      setStatus(`抓取完成：${norm.length} 条`, true);
-      toast(`抓取成功：${norm.length} 条`);
-    } catch (e) {
-      console.error('[ui-plus] fetchCatalog error:', e);
-      setStatus('抓取失败：' + (e?.message || e));
-      toast('抓取失败');
-    } finally {
-      setBusy(false);
-    }
+    setStatus('已触发下载', true);
+  } catch (e) {
+    console.error(e);
+    setStatus(e?.message || '导出失败');
+  } finally {
+    setBusy(false);
   }
+}
 
-  // -------- 导出 --------
-  async function doExport() {
-    const rows = window.__rowsForExport || [];
-    const url = (els.url?.value || '').trim();
-    const limit = parseInt(els.limit?.value || '50', 10) || 50;
-
-    setBusy(true);
-    setStatus('导出中…');
-    try {
-      if (Array.isArray(rows) && rows.length > 0) {
-        await exportToXlsxByItems({ items: rows, withImages: true, filename: 'catalog.xlsx' });
-      } else if (url) {
-        await exportToXlsxByUrl({ url, limit, withImages: true, filename: 'catalog.xlsx' });
-      } else {
-        setStatus('没有可以导出的数据');
-        return;
-      }
-      setStatus('已触发下载', true);
-      toast('导出成功，已触发下载');
-    } catch (e) {
-      console.error('[ui-plus] export error:', e);
-      setStatus('导出失败：' + (e?.message || e));
-      toast('导出失败');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // -------- 清空 --------
-  function doClear() {
-    if (els.tbody) els.tbody.innerHTML = '';
+// -------- 事件 & 健康探针 --------
+function bindEvents() {
+  $('#btnFetch')?.addEventListener('click', fetchCatalog);
+  $('#btnExport')?.addEventListener('click', doExport);
+  $('#btnClear')?.addEventListener('click', () => {
+    const tbody = $('#tbl tbody');
+    if (tbody) tbody.innerHTML = '';
     window.__rowsForExport = [];
     setStatus('已清空');
-  }
+  });
+}
 
-  // 事件绑定
-  if (els.btnFetch) els.btnFetch.addEventListener('click', fetchCatalog);
-  if (els.btnExport) els.btnExport.addEventListener('click', doExport);
-  if (els.btnClear) els.btnClear.addEventListener('click', doClear);
+async function healthProbe() {
+  try {
+    // /v1/api/health（API层），以及 /v1/health（网关层）都试探一下，非阻断
+    await fetch(`${API_BASE}/health`).catch(() => {});
+    const root = API_BASE.replace(/\/api\/?$/, '/'); // 网关根：.../v1/
+    await fetch(`${root}health`).catch(() => {});
+  } catch {}
+}
 
-  // 非阻断健康检查
-  (async () => {
-    try {
-      const r = await fetch(`${API_BASE}/health`);
-      console.info('[ui-plus] health:', r.status);
-    } catch {}
-  })();
+// -------- 启动 --------
+(function main() {
+  // 可选增强：如果 index.html 里关掉了 <meta name="ui-enhance" content="on"> 或 window.UI_ENHANCE.enhance=false，可在此 return；
+  const meta = document.querySelector('meta[name="ui-enhance"]')?.content || '';
+  const flag = (window.UI_ENHANCE?.enhance ?? meta === 'on');
+  if (!flag) return;
 
-  console.info('[ui-plus] enhancement enabled. API_BASE =', API_BASE);
+  bindEvents();
+  healthProbe();
+  setStatus('准备就绪');
 })();
