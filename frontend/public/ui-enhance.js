@@ -1,21 +1,22 @@
 // 文件：frontend/public/ui-enhance.plus.js
-// 功能：只做 UI/DOM 增强；所有网络调用统一走 getApiBase()/imageProxy()/export*；不写 /v1/* 直链。
-// 重要：此版假定 export-xlsx.js 与本文件在同一目录（frontend/public/）
+// 作用：只做 UI/DOM 增强；所有请求统一走 getApiBase()/imageProxy()/export*；绝不拼 /v1/* 直链。
+// 目录假设：与 ./export-xlsx.js 同目录（即 frontend/public/）
 import { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } from './export-xlsx.js';
 
 (() => {
   const $ = (s, r=document) => r.querySelector(s);
   const API_BASE = getApiBase();
 
-  // 读开关：?enhance=1 或 <meta name="ui-enhance" content="on">
+  // —— 开关：URL ?enhance=1 或 <meta name="ui-enhance" content="on"> 或 window.UI_ENHANCE.enhance === true
   const qs = new URLSearchParams(location.search);
   const onByMeta = (document.querySelector('meta[name="ui-enhance"]')?.content || '').toLowerCase() === 'on';
   const ENHANCE_ON = (qs.get('enhance') === '1') || onByMeta || (window.UI_ENHANCE?.enhance === true);
   if (!ENHANCE_ON) return;
 
+  // 需要的 DOM
   const els = {
-    url:   $('#txtUrl')   || $('#url') || $('input[type="url"]') || $('input'),
-    limit: $('#limit')    || $('#selLimit') || $('select'),
+    url:   $('#txtUrl') || $('#url') || $('input[type="url"]') || $('input'),
+    limit: $('#limit') || $('#selLimit') || $('select'),
     btnFetch:  $('#btnFetch'),
     btnExport: $('#btnExport'),
     btnClear:  $('#btnClear'),
@@ -39,19 +40,19 @@ import { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } from '
       bar.appendChild(item);
       setTimeout(() => { item.style.opacity='0'; item.style.transition='opacity .3s'; }, ms);
       setTimeout(() => item.remove(), ms + 320);
-    } catch { /* 忽略 */ }
+    } catch {}
   }
 
   function setBusy(b) {
     [els.url, els.limit, els.btnFetch, els.btnExport, els.btnClear].forEach(el => { if (el) el.disabled = !!b; });
     document.body.style.cursor = b ? 'progress' : 'default';
   }
-  function setStatus(msg, ok = false) {
+  function setStatus(msg, ok=false) {
     if (els.status) { els.status.textContent = msg; els.status.style.display='block'; }
     if (els.okbar)  { els.okbar.textContent  = msg; els.okbar.style.display  = ok ? 'block' : 'none'; }
   }
 
-  function renderRows(items = []) {
+  function renderRows(items=[]) {
     if (!els.tbody) return;
     els.tbody.innerHTML = '';
     items.forEach((it, i) => {
@@ -100,7 +101,7 @@ import { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } from '
   }
 
   async function doExport() {
-    const rows = window.__rowsForExport || [];
+    const rows  = window.__rowsForExport || [];
     const url   = (els.url?.value || '').trim();
     const limit = parseInt((els.limit?.value || '50'), 10) || 50;
 
