@@ -1,183 +1,216 @@
-/* eslint-disable */
-//
-// export-xlsx.js  —  统一网关工具 + 导出逻辑（支持多路回退）
-//
+// frontend/public/export-xlsx.js
+// -------------- Excel 导出（增强版） --------------
+// 设计目标：
+// 1) 兼容 /v1/export-xlsx (POST) 与 /v1/api/export-xlsx (GET) 两种网关路由；
+// 2) 从当前页面表格 #tbl 抽取 rows -> items，包含 sku/img/title/price/url；
+// 3) 返回 Blob -> 保存成 export.xlsx；
+// 4) 尽量不侵入其它脚本，暴露 window.ExportXLSX.run() 供 ui-plus 调用。
 
-/** 读取并规范化 apiBase（优先 ?api=..., 再 localStorage, 最后兜底） */
-export function getApiBase() {
-  try {
-    const search = new URLSearchParams(location.search);
-    const fromQuery = (search.get('api') || '').trim();
-    const fromStore = (localStorage.getItem('api_base') || '').trim();
-    const fallback = 'https://yunivera-gateway.onrender.com';
-    const raw = fromQuery || fromStore || fallback;
-    // 允许传进来完整的 https://xxx/v1 也允许只到域名
-    return raw.replace(/\/+$/g, '');
-  } catch (e) {
-    return 'https://yunivera-gateway.onrender.com';
+(function () {
+  const qs = new URLSearchParams(location.search);
+  const apiBaseRaw = (qs.get('api') || '').trim();
+  const API_BASE = apiBaseRaw ? apiBaseRaw.replace(/\/+$/,'') : '';
+  const LANG = (localStorage.getItem('mvp_lang') || 'zh').toLowerCase();
+
+  const $ = (s, el=document) => el.querySelector(s);
+  const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+
+  const tip = {
+    ok: (msg)   => setStatus(msg || 'ok', true),
+    fail:(msg)  => setStatus(msg || 'Failed to export', false),
+    info:(msg)  => setStatus(msg || 'Working...', true)
+  };
+
+  function setStatus(text, ok) {
+    let bar = $('#okbar');
+    if (!bar) return;
+    bar.style.display = 'block';
+    bar.className = ok ? 'alert ok' : 'alert info';
+    bar.textContent = text;
   }
-}
 
-/** 组装两个候选网关前缀：/v1/api 和 /v1 */
-function apiCandidates(apiBase) {
-  const base = apiBase.replace(/\/+$/g, '');
-  return [`${base}/v1/api`, `${base}/v1`];
-}
+  // 生成两个可能的导出端点：优先 /v1/export-xlsx（POST），失败退回到 /v1/api/export-xlsx（GET）
+  function endpoints() {
+    if (!API_BASE) return [];
+    return [
+      { kind: 'post', url: `${API_BASE}/v1/export-xlsx` },
+      { kind: 'get',  url: `${API_BASE}/v1/api/export-xlsx` }
+    ];
+  }
 
-/** 组装请求 URL（会同时返回两条候选，调用方逐个尝试） */
-function buildCandidates(apiBase, path, queryObj) {
-  const qs = queryObj
-    ? '?' + new URLSearchParams(queryObj).toString()
-    : '';
-  const paths = path.replace(/^\/+/, '');
-  return apiCandidates(apiBase).map(p => `${p}/${paths}${qs}`);
-}
+  // 表格抽取器：#tbl -> items
+  function collectRows() {
+    const rows = $$('#tbl tbody tr');
+    const items = [];
 
-/** 尝试顺序请求第一个可用的 URL（返回 Response） */
-async function tryFetch(urls, init) {
-  let lastErr;
-  for (const u of urls) {
+    rows.forEach(tr => {
+      const tds = tr.children;
+      if (!tds || tds.length < 6) return;
+
+      // 列结构（按你页面）：# | 货号 | 图片 | 描述 | 单价 | 打开
+      const sku    = (tds[1].textContent || '').trim();
+      const imgEl  = $('img', tds[2]);
+      const title  = (tds[3].textContent || '').trim();
+      const price  = (tds[4].textContent || '').trim();
+      const aOpen  = $('.open-link, a', tds[5]);
+
+      // 原图链接（来自 <img data-src 或 src>）
+      const imgRaw = (imgEl && (imgEl.getAttribute('data-src') || imgEl.getAttribute('data-original') || imgEl.src)) || '';
+      // 若你启用了图片代理，img 可能是 gateway 地址；尝试还原出原图（如果 data-raw 存在）
+      const imgRawData = imgEl?.getAttribute?.('data-raw') || '';
+      const imgUrlOriginal = imgRawData || imgRaw;
+
+      // 尝试给出一个“代理图 URL”（供后端自由选择）
+      const imgProxy = buildImageProxy(imgUrlOriginal);
+
+      const url = aOpen ? aOpen.getAttribute('href') : '';
+
+      items.push({
+        sku,
+        title,
+        price,
+        img: imgUrlOriginal,
+        img_proxy: imgProxy,
+        url
+      });
+    });
+
+    return items;
+  }
+
+  function buildImageProxy(raw) {
+    if (!raw || !API_BASE) return '';
+    const candidates = [
+      `${API_BASE}/v1/image?url=${encodeURIComponent(raw)}`,
+      `${API_BASE}/v1/image?format=raw&url=${encodeURIComponent(raw)}`,
+      `${API_BASE}/v1/api/image?url=${encodeURIComponent(raw)}`,
+      `${API_BASE}/v1/api/image?format=raw&url=${encodeURIComponent(raw)}`
+    ];
+    return candidates[0]; // 给一个主用，后端可忽略
+  }
+
+  async function exportViaPost(ep, payload) {
+    const res = await fetch(ep.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      // 让 Cloudflare/Proxy 不缓存
+      cache: 'no-store',
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error(`POST ${ep.url} -> ${res.status}`);
+    return await res.blob();
+  }
+
+  async function exportViaGet(ep, query) {
+    // 旧 GET 方案：把 url & limit 挂在 query_string（后端自行抓）
+    const u = new URL(ep.url);
+    Object.entries(query || {}).forEach(([k,v]) => u.searchParams.set(k, v));
+    const res = await fetch(u.toString(), { method: 'GET', cache: 'no-store' });
+    if (!res.ok) throw new Error(`GET ${u} -> ${res.status}`);
+    return await res.blob();
+  }
+
+  function downloadBlob(blob, filename='export.xlsx') {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      a.remove();
+    }, 0);
+  }
+
+  function currentCatalogUrl() {
+    // 输入框值
+    const urlInput = $('#txtUrl');
+    const val = urlInput ? (urlInput.value || '').trim() : '';
+    return val;
+  }
+
+  async function runExport() {
     try {
-      const res = await fetch(u, init);
-      // 某些平台 CORS 失败会直接 throw；这里能拿到就看状态码
-      if (res.ok) return res;
-      lastErr = new Error(`HTTP ${res.status} @ ${u}`);
+      if (!API_BASE) {
+        tip.fail('缺少 ?api= 网关地址');
+        return;
+      }
+      const list = collectRows();
+      if (!list.length) {
+        tip.fail('没有可导出的数据');
+        return;
+      }
+
+      tip.info(LANG.startsWith('zh') ? '正在导出...' : 'Exporting...');
+
+      const payload = {
+        ok: true,
+        url: currentCatalogUrl(),
+        count: list.length,
+        adapter: 'generic-cards',
+        items: list,   // 原始项
+        rows: list,    // 行视图（后端任意取用）
+        data: list     // 兼容字段
+      };
+
+      const eps = endpoints();
+      if (!eps.length) {
+        tip.fail('网关未配置');
+        return;
+      }
+
+      // 优先 POST /v1/export-xlsx
+      let got = null;
+      let err = null;
+
+      // 1) POST
+      const epPost = eps.find(e => e.kind === 'post');
+      if (epPost) {
+        try {
+          got = await exportViaPost(epPost, payload);
+        } catch (e) {
+          err = e;
+        }
+      }
+
+      // 2) 回退 GET /v1/api/export-xlsx?url=...&limit=...
+      if (!got) {
+        const epGet = eps.find(e => e.kind === 'get');
+        if (!epGet) throw err || new Error('没有可用导出端点');
+        const q = {
+          url: payload.url || location.href,
+          limit: String(list.length || 50)
+        };
+        got = await exportViaGet(epGet, q);
+      }
+
+      downloadBlob(got, 'export.xlsx');
+      tip.ok(LANG.startsWith('zh') ? '导出成功' : 'Exported.');
     } catch (e) {
-      lastErr = e;
+      console.error('[export-xlsx] failed:', e);
+      tip.fail((LANG.startsWith('zh') ? '导出失败：' : 'Export failed: ') + (e.message || e));
     }
   }
-  throw lastErr || new Error('No candidate url works');
-}
 
-/** ---------- 图片代理 ---------- */
-
-/** 生成图片代理 URL（多路回退，必要时可直接返回源图） */
-export function imageProxy(originUrl, opts = {}) {
-  const apiBase = getApiBase();
-  const query = {
-    format: (opts.format || 'raw'),
-    url: originUrl || '',
+  // 对外：给 ui-plus 调用；也绑定按钮
+  const api = {
+    run: runExport
   };
-  const [u1, u2] = buildCandidates(apiBase, 'image', query);
-  // 不直接 fetch，这里只返回 URL，交给 <img> 去加载。
-  // 尝试优先 /v1/api/image；如果你更想兜底原图，可在 loadfail 时切换。
-  return {
-    primary: u1,
-    fallback: u2,
-    raw: originUrl || '',
-  };
-}
+  window.ExportXLSX = api;
 
-/** ---------- 导出（优先后端，失败前端兜底 CSV） ---------- */
-
-function downloadBlob(filename, blob) {
-  const a = document.createElement('a');
-  a.download = filename;
-  a.href = URL.createObjectURL(blob);
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 0);
-}
-
-/** 前端兜底：把 rows 导出为 CSV（Excel 可直接打开） */
-function exportCsvFallback(filename, rows) {
-  const escapeCell = (v) => {
-    if (v == null) return '';
-    const s = String(v);
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-  const lines = rows.map(r => r.map(escapeCell).join(',')).join('\r\n');
-  const blob = new Blob([lines], { type: 'text/csv;charset=utf-8' });
-  downloadBlob(filename.replace(/\.xlsx$/i, '') + '.xlsx', blob);
-}
-
-/** 用 URL 让后端导出（失败则前端兜底） */
-export async function exportToXlsxByUrl({ url, limit = 50, lang = 'zh' }, fallbackRows = null) {
-  const apiBase = getApiBase();
-  const body = { url, limit, lang };
-  const headers = { 'Content-Type': 'application/json' };
-  const candidates = buildCandidates(apiBase, 'export-xlsx', null);
-
-  // 优先后端导出
-  try {
-    const res = await tryFetch(candidates, {
-      method: 'POST',
-      mode: 'cors',
-      credentials: 'omit',
-      headers,
-      body: JSON.stringify(body),
-    });
-    // 约定后端直接返回 .xlsx 二进制
-    const blob = await res.blob();
-    const file = (url || '').replace(/https?:\/\//, '').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'export';
-    downloadBlob(file + '.xlsx', blob);
-    return { ok: true, via: 'backend' };
-  } catch (e) {
-    // 后端失败 → 前端兜底
-    if (fallbackRows && Array.isArray(fallbackRows) && fallbackRows.length) {
-      exportCsvFallback('export.xlsx', fallbackRows);
-      return { ok: true, via: 'frontend-csv' };
+  // 自动挂到按钮
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = $('#btnExport');
+    if (btn && !btn._exportBound) {
+      btn._exportBound = true;
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        api.run();
+      });
     }
-    throw e;
-  }
-}
-
-/** 用 items 让后端导出（失败则前端兜底） */
-export async function exportToXlsxByItems({ items = [], lang = 'zh' }) {
-  const apiBase = getApiBase();
-  const body = { items, lang };
-  const headers = { 'Content-Type': 'application/json' };
-  const candidates = buildCandidates(apiBase, 'export-xlsx', null);
-
-  try {
-    const res = await tryFetch(candidates, {
-      method: 'POST',
-      mode: 'cors',
-      credentials: 'omit',
-      headers,
-      body: JSON.stringify(body),
-    });
-    const blob = await res.blob();
-    downloadBlob('export.xlsx', blob);
-    return { ok: true, via: 'backend' };
-  } catch (e) {
-    // 前端兜底：把 items 映射成二维表
-    const header = ['#', 'sku', 'img', 'title', 'desc', 'price', 'url'];
-    const rows = [header];
-    items.forEach((it, i) => {
-      rows.push([
-        i + 1,
-        it.sku || '',
-        it.img || '',
-        it.title || '',
-        it.desc || '',
-        it.price || '',
-        it.url || '',
-      ]);
-    });
-    exportCsvFallback('export.xlsx', rows);
-    return { ok: true, via: 'frontend-csv' };
-  }
-}
-
-/** ---------- 目录抓取（供 UI 使用） ---------- */
-
-/** 通过网关 GET 解析目录（多路回退） */
-export async function parseCatalogByUrl({ url, limit = 50, lang = 'zh' }) {
-  const apiBase = getApiBase();
-  // 后端支持 GET /catalog/parse?url=&limit=&lang=
-  const candidates = buildCandidates(apiBase, 'catalog/parse', { url, limit, lang });
-  const res = await tryFetch(candidates, {
-    method: 'GET',
-    mode: 'cors',
-    credentials: 'omit',
   });
-  return res.json(); // 约定返回 {ok, items|rows|list, ...}
-}
-
-/** 公开工具，UI 可能用到 */
-export const __internal = { apiCandidates, buildCandidates, tryFetch, downloadBlob, exportCsvFallback };
+})();
