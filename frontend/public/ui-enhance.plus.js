@@ -1,147 +1,158 @@
 // frontend/public/ui-enhance.plus.js
-// 统一入口（页面脚本只引用这一份）
+import { getApiBase, imageProxy, exportToXlsxByItems, exportToXlsxByUrl } from './export-xlsx.js';
 
-/* ---------------- 工具：API 基址 / 图片代理 ---------------- */
-function readApiBase() {
-  // 先读 ?api= 覆盖；再读 <meta name="api-base">；最后兜底 '/v1'
-  try {
-    const u = new URL(window.location.href);
-    const qp = u.searchParams.get('api');
-    const meta = document.querySelector('meta[name="api-base"]')?.content || '';
-    const base = (qp || meta || '/v1').replace(/\/+$/, ''); // 去尾斜杠
-    return base;
-  } catch {
-    return '/v1';
-  }
-}
-const API_BASE = readApiBase();
+(function () {
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
 
-export function imageProxy(originalUrl, format = 'raw') {
-  // 仅负责组合代理地址；后端未放行时，返回的 URL 访问会 404，但不会影响页面
-  const src = encodeURIComponent(originalUrl || '');
-  const fmt = encodeURIComponent(format || 'raw');
-  return `${API_BASE}/image?format=${fmt}&url=${src}`;
-}
+  const API_BASE = getApiBase(); // <meta name="api-base"> 或 ?api= 决定，必须包含 /v1/api
 
-/* ---------------- DOM 引用 ---------------- */
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-const elUrl = $('#txtUrl');
-const elLimit = $('#txtLimit');
-const elTbl = $('#tbl tbody');
-const elStatus = $('#status');
-const elOk = $('#okbar');
+  const els = {
+    url: $('#txtUrl') || $('input[type="text"], input#txtUrl'),
+    limit: $('#limit') || $('input[type="number"], input#limit'),
+    btnFetch: $('#btnFetch'),
+    btnExport: $('#btnExport'),
+    btnClear: $('#btnClear'),
+    table: $('#tbl') || $('#tb1'),
+    status: $('#status')
+  };
 
-/* ---------------- 渲染与状态 ---------------- */
-function setStatus(type, msg) {
-  elStatus.className = 'status ' + (type || '');
-  elStatus.textContent = msg;
-}
-function clearTable() {
-  elTbl.innerHTML = '';
-  setStatus('', '已清空');
-  elOk.style.display = 'none';
-}
-function renderRows(rows = []) {
-  const frag = document.createDocumentFragment();
-  rows.forEach((r, i) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${i + 1}</td>
-      <td>${r.sku || ''}</td>
-      <td>${r.img ? `<img class="img" src="${imageProxy(r.img, 'raw')}" alt="">` : ''}</td>
-      <td>${r.title || ''}${r.desc ? `<div class="muted">${r.desc}</div>` : ''}</td>
-      <td>${r.price || ''}</td>
-      <td>${r.url ? `<a class="link" href="${r.url}" target="_blank">打开</a>` : ''}</td>
-    `;
-    frag.appendChild(tr);
-  });
-  elTbl.innerHTML = '';
-  elTbl.appendChild(frag);
-}
-
-/* ---------------- 抓取目录 ---------------- */
-async function fetchCatalog() {
-  const url = String(elUrl.value || '').trim();
-  const limit = Math.max(1, Number(elLimit.value || 50)) || 50;
-
-  if (!url) {
-    setStatus('warn', '请先输入目录链接');
-    return;
+  function toast(msg, ms = 2000) {
+    try {
+      let bar = document.getElementById('__toast__');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = '__toast__';
+        bar.style.cssText =
+          'position:fixed;right:16px;top:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;';
+        document.body.appendChild(bar);
+      }
+      const item = document.createElement('div');
+      item.textContent = msg;
+      item.style.cssText =
+        'background:#111827;color:#fff;padding:10px 12px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.15)';
+      bar.appendChild(item);
+      setTimeout(() => item.remove(), ms);
+    } catch {}
   }
 
-  setStatus('', '抓取中...');
-  try {
-    const api = `${API_BASE}/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}`;
-    const rs = await fetch(api, { method: 'GET' });
-    if (!rs.ok) throw new Error(`HTTP ${rs.status}`);
-    const data = await rs.json();
-
-    const rows = data?.rows || data?.list || data?.items || [];
-    renderRows(rows);
-    setStatus('ok', `抓取完成：共 ${rows.length} 条`);
-    elOk.style.display = '';
-  } catch (e) {
-    setStatus('err', `抓取失败：${e.message || e}`);
-    console.error(e);
+  function setStatus(text, ok = true) {
+    if (!els.status) return;
+    els.status.textContent = text || '';
+    els.status.className = ok ? 'alert ok' : 'alert warn';
   }
-}
 
-/* ---------------- 导出（就地行 / 后端直连） ---------------- */
-async function exportXlsx(mode = 'items') {
-  // 动态 import，按需加载导出模块
-  const modPath = (window.UI_ENHANCE?.exportModule) || './export-xlsx.js';
-  const { exportToXlsxByItems, exportToXlsxByUrl } = await import(modPath);
+  function buildCatalogParseUrl(siteUrl, limit) {
+    const u = new URL(`${API_BASE}/catalog/parse`, window.location.origin);
+    u.searchParams.set('url', siteUrl);
+    u.searchParams.set('limit', String(limit || 50));
+    u.searchParams.set('ts', String(Date.now()));
+    return u.toString();
+  }
 
-  try {
-    if (mode === 'url') {
-      // 后端直连：把目录链接交给网关导出（后端未放 /v1/export-xlsx 前，会 404）
-      const url = String(elUrl.value || '').trim();
-      const limit = Math.max(1, Number(elLimit.value || 50)) || 50;
-      if (!url) throw new Error('缺少目录链接');
-      await exportToXlsxByUrl(`${API_BASE}/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}`, {
-        filename: '商品数据导出(直连).xlsx'
-      });
-    } else {
-      // 就地行导出：从页面读取 rows 结构（最稳）
-      const rows = $$('#tbl tbody tr').map(tr => {
-        const tds = tr.children;
-        return {
-          idx: tds[0]?.textContent?.trim(),
-          sku: tds[1]?.textContent?.trim(),
-          img: $('img', tds[2])?.getAttribute('src') || '',
-          title: tds[3]?.firstChild?.textContent?.trim() || tds[3]?.textContent?.trim() || '',
-          price: tds[4]?.textContent?.trim(),
-          url: $('a', tds[5])?.getAttribute('href') || ''
-        };
-      });
-      await exportToXlsxByItems(rows, {
-        filename: '商品数据导出(就地).xlsx'
-      });
+  function fillTable(rows = []) {
+    if (!els.table) return;
+    // 清空 tbody
+    const tbody = els.table.tBodies?.[0] || els.table.querySelector('tbody') || els.table;
+    tbody.innerHTML = '';
+
+    rows.forEach((r, idx) => {
+      const tr = document.createElement('tr');
+
+      const tdIdx = document.createElement('td');
+      tdIdx.textContent = String(idx + 1);
+      tr.appendChild(tdIdx);
+
+      const tdSku = document.createElement('td');
+      tdSku.textContent = r.sku || '';
+      tr.appendChild(tdSku);
+
+      const tdImg = document.createElement('td');
+      if (r.img) {
+        const img = document.createElement('img');
+        img.src = imageProxy(r.img, 'raw');
+        img.style.cssText = 'width:72px;height:72px;object-fit:contain;border:1px solid #eee;border-radius:6px;';
+        tdImg.appendChild(img);
+      }
+      tr.appendChild(tdImg);
+
+      const tdDesc = document.createElement('td');
+      tdDesc.textContent = r.desc || r.title || '';
+      tr.appendChild(tdDesc);
+
+      const tdPrice = document.createElement('td');
+      tdPrice.textContent = r.price || '';
+      tr.appendChild(tdPrice);
+
+      const tdOpen = document.createElement('td');
+      if (r.url) {
+        const a = document.createElement('a');
+        a.href = r.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = '打开';
+        tdOpen.appendChild(a);
+      }
+      tr.appendChild(tdOpen);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function doFetch() {
+    try {
+      const siteUrl = (els.url?.value || '').trim();
+      const limit = Number(els.limit?.value || 50) || 50;
+      if (!siteUrl) {
+        toast('请输入要抓取的目录链接');
+        return;
+      }
+
+      setStatus('抓取中…', true);
+
+      const url = buildCatalogParseUrl(siteUrl, limit);
+      const res = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } });
+      if (!res.ok) {
+        setStatus(`抓取失败：${res.status} ${res.statusText}`, false);
+        return;
+      }
+
+      const data = await res.json(); // 约定：{ ok, rows, items, list, data, count }
+      const rows = data?.rows || data?.items || data?.list || data?.data || [];
+      fillTable(rows);
+      setStatus(`抓取成功：共 ${rows.length} 条`, true);
+    } catch (err) {
+      setStatus(`抓取失败：${err?.message || err}`, false);
     }
-    setStatus('ok', '导出任务已触发');
-  } catch (e) {
-    setStatus('err', `导出失败：${e.message || e}`);
-    console.error(e);
   }
-}
 
-/* ---------------- 绑定事件 ---------------- */
-$('#btnFetch')?.addEventListener('click', fetchCatalog);
-$('#btnClear')?.addEventListener('click', clearTable);
-$('#btnExport')?.addEventListener('click', () => exportXlsx('items'));
-
-// 支持回车即抓取
-elUrl?.addEventListener('keydown', e => { if (e.key === 'Enter') fetchCatalog(); });
-
-/* ---------------- 首次载入：如果地址栏带 ?url= 就自动抓取 ---------------- */
-try {
-  const u = new URL(location.href);
-  const urlInQuery = u.searchParams.get('url');
-  const limitInQuery = u.searchParams.get('limit');
-  if (urlInQuery) {
-    elUrl.value = urlInQuery;
-    if (limitInQuery) elLimit.value = limitInQuery;
-    fetchCatalog();
+  async function doExportUrl() {
+    try {
+      const siteUrl = (els.url?.value || '').trim();
+      const limit = Number(els.limit?.value || 50) || 50;
+      if (!siteUrl) {
+        toast('请输入目录链接再导出');
+        return;
+      }
+      await exportToXlsxByUrl(siteUrl, { limit });
+    } catch (err) {
+      toast(err?.message || String(err));
+    }
   }
-} catch {}
+
+  function doClear() {
+    try {
+      const tbody = els.table?.tBodies?.[0] || els.table?.querySelector('tbody') || els.table;
+      if (tbody) tbody.innerHTML = '';
+      setStatus('准备就绪', true);
+    } catch {}
+  }
+
+  // 事件绑定
+  els.btnFetch && els.btnFetch.addEventListener('click', doFetch);
+  els.btnExport && els.btnExport.addEventListener('click', doExportUrl);
+  els.btnClear && els.btnClear.addEventListener('click', doClear);
+
+  // 首屏提示
+  setStatus('准备就绪', true);
+})();
