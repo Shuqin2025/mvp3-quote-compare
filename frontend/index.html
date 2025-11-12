@@ -3,88 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 允许 ?api= 覆盖；否则读此 meta；再否则 /v1/api -->
+  <!-- 强烈建议把网关根设在这里，也支持用 ?api= 覆盖 -->
   <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1/api" />
   <meta name="ui-enhance" content="on" />
   <title>云贸星 · 智能表格生成器</title>
-  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
   <style>
-    :root { --bg:#f7f8fa; --card:#fff; --border:#e5e7eb; --brand:#2563eb; --text:#111827; }
-    * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; }
-    .wrap { max-width:1100px; margin:0 auto; padding:28px 18px; }
-    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .btn { height:36px; padding:0 14px; border:1px solid var(--border); border-radius:8px; background:#fff; cursor:pointer; }
-    .btn.primary { background:var(--brand); color:#fff; border-color:var(--brand); }
-    .btn:disabled { opacity:.6; cursor:not-allowed; }
-    .input { height:36px; padding:0 12px; border:1px solid var(--border); border-radius:8px; min-width:320px; flex:1; }
-    .card { margin-top:16px; border:1px solid var(--border); border-radius:12px; background:var(--card); overflow:hidden; }
-    .card-head { padding: 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; }
-    .card-body { min-height:420px; overflow:auto; padding: 16px; }
-    .alert { margin-top:12px; border-radius:8px; padding:10px 12px; }
-    .alert.info { background:#fff8e1; border:1px solid #ffecb3; color:#8d6e63; }
-    .alert.ok { background:#e8f5e9; border:1px solid #c8e6c9; color:#2e7d32; display:none; }
-    table { width:100%; border-collapse:collapse; }
-    th, td { border:1px solid #eee; padding:8px; vertical-align:top; }
-    th { background:#fafafa; white-space:nowrap; }
-    img.thumb { width:72px; height:48px; object-fit:contain; background:#fff; }
-    .langbar { display:flex; gap:6px; margin-bottom:10px; }
+    body{font:14px/1.6 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;}
+    .toolbar{display:flex;gap:8px;align-items:center;margin:18px 0;}
+    .btn{padding:6px 12px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer}
+    .btn.primary{background:#2563eb;color:#fff;border-color:#1e40af}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border:1px solid #eee;padding:8px;vertical-align:top}
+    th{background:#f6f7fb}
+    .thumb{height:54px;max-width:120px;object-fit:contain;border-radius:4px;background:#fff}
+    .alert{display:block;color:#444}
+    .alert.ok{color:#065f46}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="langbar">
-      <button class="btn" id="btnLangZh">CN 中文</button>
-      <button class="btn" id="btnLangDe">DE Deutsch</button>
-      <button class="btn" id="btnLangEn">GB English</button>
-    </div>
-
-    <h1 style="margin:0 0 8px; font-weight:600">云贸星 · 智能表格生成器</h1>
-    <div style="color:#6b7280">输入目录型网页链接，秒生成 Excel 产品表格。</div>
-
-    <div class="card">
-      <div class="card-head">
-        <input id="txtUrl" class="input" placeholder="https://example.com/category/..." />
-        <input id="limit" class="input" style="max-width:140px" value="50" />
-        <button id="btnFetch" class="btn primary">抓取目录</button>
-        <button id="btnExport" class="btn">导出 Excel（.xlsx）</button>
-        <button id="btnClear" class="btn">清空数据</button>
-      </div>
-      <div class="card-body">
-        <div id="status" class="alert info">准备就绪</div>
-        <div id="okbar" class="alert ok"></div>
-        <table id="tbl">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>货号</th>
-              <th>图片</th>
-              <th>描述</th>
-              <th>单价</th>
-              <th>打开</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
+  <div class="toolbar">
+    <input id="txtUrl" style="width:420px" placeholder="https://example.com/category/..." />
+    <input id="limit" type="number" value="50" style="width:80px" />
+    <button id="btnFetch"  class="btn primary">抓取目录</button>
+    <button id="btnExport" class="btn">导出 Excel（.xlsx）</button>
+    <button id="btnClear"  class="btn">清空数据</button>
   </div>
 
-  <!-- UI 增强开关：交由 frontend/public/export-xlsx.js 实现导出/图片代理等 -->
-  <script>
-    window.UI_ENHANCE = {
-      enhance: true,
-      exportModule: './public/export-xlsx.js'
-    };
-    // 语言切换仅写在页面，实际抓取/导出仍由 ui-enhance.plus.js 处理
-    const $ = s => document.querySelector(s);
-    $('#btnLangZh')?.addEventListener('click', () => localStorage.setItem('mvp_lang','zh'));
-    $('#btnLangDe')?.addEventListener('click', () => localStorage.setItem('mvp_lang','de'));
-    $('#btnLangEn')?.addEventListener('click', () => localStorage.setItem('mvp_lang','en'));
-  </script>
+  <div id="status" class="alert">准备就绪</div>
+  <div id="okbar" class="alert ok" style="display:none"></div>
 
-  <!-- plus 入口（保持相对路径！针对 frontend/ 目录） -->
+  <table id="tbl">
+    <thead>
+      <tr>
+        <th>#</th><th>货号</th><th>图片</th><th>描述</th><th>单价</th><th>打开</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- 唯一入口：plus 版（强制 /v1/api/*） -->
   <script type="module" src="./public/ui-enhance.plus.js?enhance=1"></script>
 </body>
 </html>
-
