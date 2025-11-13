@@ -1,220 +1,304 @@
-/**
- * ui-enhance.plus.js
- * - 统一解析 apiBase（优先 URL ?api=，否则自动从站点拼出）
- * - 目录抓取：GET {apiBase}/catalog/parse?url=&limit=
- * - 图片：优先走 {apiBase}/image?format=raw&url=，失败退回直链原图
- * - 导出：优先 POST {apiBase}/export-xlsx，失败退回前端本地生成
- *
- * 需要配合 public/export-xlsx.js
+/* frontend/public/ui-enhance.plus.js
+ * UI 增强：统一网关、目录抓取、图片代理、Excel 导出、i18n 和懒加载
+ * 兼容 index.html（按钮 id：btnFetch / btnExport / btnClear；输入框 id：txtUrl / txtLimit；表格 id：tbl；状态 id：status / okbar）
  */
 
-(function () {
-  const qs = new URLSearchParams(location.search);
-  const fromQuery = qs.get("api");
-  const apiBase =
-    (fromQuery && fromQuery.replace(/\/+$/, "")) ||
-    "https://yunivera-gateway.onrender.com/v1";
+const qs = (s, r = document) => r.querySelector(s);
+const qsa = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-  // 控件
-  const $url = document.querySelector("#txtUrl") || document.querySelector('input[type="text"]');
-  const $limit = document.querySelector("#txtLimit") || document.querySelector('input[type="number"]');
-  const $btnFetch = document.querySelector("#btnFetch") || document.querySelector('button[id="btnFetch"]');
-  const $btnExport = document.querySelector("#btnExport") || document.querySelector('button[id="btnExport"]');
-  const $btnClear = document.querySelector("#btnClear") || document.querySelector('button[id="btnClear"]');
-  const $tbody = document.querySelector("#tbl tbody") || (function () {
-    // 兼容老结构
-    const t = document.querySelector("table#tbl") || document.querySelector("table");
-    return t ? (t.tBodies[0] || t.createTBody()) : null;
-  })();
-  const $status = document.querySelector("#status") || document.querySelector("div.status");
-  const $okbar = document.querySelector("#okbar");
+/** ---------- 配置 / i18n ---------- */
+const I18N = {
+  zh: {
+    title: '云贸星 · 智能表格生成器',
+    ready: 'Ready',
+    fetching: '抓取中…',
+    ok: 'ok',
+    failed: '抓取失败：',
+    idx: '#',
+    sku: '货号',
+    img: '图片',
+    desc: '描述',
+    price: '单价',
+    open: '打开',
+    export: '导出 Excel（.xlsx）',
+    cleared: '已清空',
+  },
+  de: {
+    title: 'Yuniverse · Intelligenter Tabellen-Generator',
+    ready: 'Bereit',
+    fetching: 'Wird abgerufen…',
+    ok: 'ok',
+    failed: 'Fehlgeschlagen: ',
+    idx: '#',
+    sku: 'Artikel-Nr.',
+    img: 'Bild',
+    desc: 'Beschreibung',
+    price: 'Preis',
+    open: 'öffnen',
+    export: 'Excel exportieren (.xlsx)',
+    cleared: 'Gelöscht',
+  },
+  en: {
+    title: 'Yuniverse · Smart Sheet Builder',
+    ready: 'Ready',
+    fetching: 'Fetching…',
+    ok: 'ok',
+    failed: 'Failed: ',
+    idx: '#',
+    sku: 'SKU',
+    img: 'Image',
+    desc: 'Description',
+    price: 'Price',
+    open: 'open',
+    export: 'Export Excel (.xlsx)',
+    cleared: 'Cleared',
+  },
+};
 
-  console.log("[ui-plus] enabled, apiBase =", apiBase);
+const getLang = () => {
+  const v = localStorage.getItem('mvp_lang');
+  return v && I18N[v] ? v : 'zh';
+};
 
-  let currentRows = [];
+const LANG = getLang();
 
-  function setStatus(msg, type) {
-    if (!$status) return;
-    $status.textContent = msg || "";
-    $status.className = "status " + (type || "info");
+/** ---------- 网关探测 ---------- */
+const urlParams = new URLSearchParams(location.search);
+const apiBase =
+  (urlParams.get('api') && decodeURIComponent(urlParams.get('api'))) ||
+  'https://yunivera-gateway.onrender.com';
+
+console.log('[ui-plus] enabled, apiBase =', apiBase);
+
+/** ---------- DOM ---------- */
+const $url = qs('#txtUrl');
+const $limit = qs('#txtLimit');
+const $btnFetch = qs('#btnFetch');
+const $btnExport = qs('#btnExport');
+const $btnClear = qs('#btnClear');
+const $status = qs('#status');
+const $okbar = qs('#okbar');
+const $table = qs('#tbl');
+const $tbody = $table ? $table.tBodies[0] || $table.createTBody() : null;
+
+/** ---------- 工具 ---------- */
+const setStatus = (text, ok = false) => {
+  if ($status) $status.textContent = text;
+  if ($okbar) $okbar.style.display = ok ? '' : 'none';
+};
+
+const toNumber = (v, d = 50) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.min(500, n) : d;
+};
+
+const buildImgSrc = (raw) => {
+  if (!raw) return '';
+  // 统一通过网关代理图片（避免 CORS）
+  return `${apiBase}/image?format=raw&url=${encodeURIComponent(raw)}`;
+};
+
+const fetchJSON = async (url, init) => {
+  const resp = await fetch(url, init);
+  const ct = resp.headers.get('content-type') || '';
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`HTTP ${resp.status} ${resp.statusText} - ${txt.slice(0, 200)}`);
+  }
+  if (ct.includes('application/json')) return resp.json();
+  // 非 JSON 也返回空对象以防止崩
+  return {};
+};
+
+const downloadBlob = (blob, filename) => {
+  const a = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
+/** ---------- 懒加载 ---------- */
+const lazyMarker = 'data-src';
+const ensureLazy = () => {
+  const imgs = qsa(`img[${lazyMarker}]`);
+  if (!imgs.length) return;
+
+  if (!('IntersectionObserver' in window)) {
+    imgs.forEach((img) => (img.src = img.getAttribute(lazyMarker)));
+    return;
   }
 
-  function asInt(v, d) {
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : d;
+  const io = new IntersectionObserver((ents) => {
+    ents.forEach((e) => {
+      if (e.isIntersecting) {
+        const img = e.target;
+        img.src = img.getAttribute(lazyMarker);
+        img.removeAttribute(lazyMarker);
+        io.unobserve(img);
+      }
+    });
+  });
+  imgs.forEach((img) => io.observe(img));
+};
+
+/** ---------- 渲染 ---------- */
+const T = I18N[LANG];
+const renderHeader = () => {
+  // 简单的多语言表头（只在页面已有结构的情况下替换 th 文案）
+  const ths = qsa('#tbl thead th');
+  if (ths.length >= 5) {
+    ths[0].textContent = T.idx;
+    ths[1].textContent = T.sku;
+    ths[2].textContent = T.img;
+    ths[3].textContent = T.desc;
+    ths[4].textContent = T.price;
+    if (ths[5]) ths[5].textContent = T.open;
   }
+};
 
-  function buildParseURL(url, limit) {
-    const base = apiBase.replace(/\/+$/, "");
-    const u = new URL(base + "/catalog/parse");
-    u.searchParams.set("url", url);
-    if (limit) u.searchParams.set("limit", String(limit));
-    return u.toString();
-  }
+const renderRows = (rows = []) => {
+  if (!$tbody) return;
+  $tbody.innerHTML = '';
 
-  function imgProxyUrl(raw) {
-    const base = apiBase.replace(/\/+$/, "");
-    const u = new URL(base + "/image");
-    u.searchParams.set("format", "raw");
-    u.searchParams.set("url", raw);
-    return u.toString();
-  }
+  rows.forEach((item, i) => {
+    const tr = document.createElement('tr');
 
-  function clearTable() {
-    currentRows = [];
-    if ($tbody) $tbody.innerHTML = "";
-    setStatus("Ready", "info");
-    if ($okbar) $okbar.style.display = "none";
-  }
+    const tdIdx = document.createElement('td');
+    tdIdx.textContent = String(i + 1);
 
-  // 统一渲染一行
-  function renderRow(idx, item) {
-    // 结构标准化
-    const row = {
-      sku: item.sku || "",
-      img: item.img || item.image || "",
-      title: item.title || item.desc || "",
-      price: item.price || "",
-      url: item.url || item.href || "",
-    };
+    const tdSku = document.createElement('td');
+    tdSku.textContent = item.sku || '';
 
-    const tr = document.createElement("tr");
-
-    // 序号
-    const tdIdx = document.createElement("td");
-    tdIdx.textContent = String(idx + 1);
-    tdIdx.style.width = "48px";
-    tr.appendChild(tdIdx);
-
-    // 货号
-    const tdSku = document.createElement("td");
-    tdSku.textContent = row.sku || "";
-    tdSku.style.width = "110px";
-    tr.appendChild(tdSku);
-
-    // 图片
-    const tdImg = document.createElement("td");
-    tdImg.style.width = "110px";
-    const img = document.createElement("img");
-    img.alt = row.sku || "img";
-    img.loading = "lazy";
-    img.referrerPolicy = "no-referrer";
-    img.style.maxWidth = "90px";
-    img.style.maxHeight = "90px";
-    // 先走网关代理，失败再回退直链
-    const rawImg = row.img || "";
-    if (rawImg) {
-      img.src = imgProxyUrl(rawImg);
-      img.addEventListener("error", () => {
-        img.src = rawImg;
-      });
+    const tdImg = document.createElement('td');
+    const img = document.createElement('img');
+    img.alt = item.sku || '';
+    img.width = 60;
+    img.height = 60;
+    img.style.objectFit = 'contain';
+    // 懒加载：先打占位，真正 src 用 data-src
+    const proxied = buildImgSrc(item.img);
+    if (proxied) {
+      img.setAttribute(lazyMarker, proxied);
+      img.src =
+        'data:image/svg+xml;charset=utf-8,' +
+        encodeURIComponent(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60"><text x="50%" y="50%" font-size="10" dominant-baseline="middle" text-anchor="middle" fill="#888">img</text></svg>`,
+        );
     }
     tdImg.appendChild(img);
-    tr.appendChild(tdImg);
 
-    // 描述
-    const tdTitle = document.createElement("td");
-    tdTitle.textContent = row.title || "";
-    tr.appendChild(tdTitle);
+    const tdDesc = document.createElement('td');
+    tdDesc.textContent = item.title || item.desc || '';
 
-    // 单价
-    const tdPrice = document.createElement("td");
-    tdPrice.textContent = row.price || "";
-    tdPrice.style.width = "90px";
-    tr.appendChild(tdPrice);
+    const tdPrice = document.createElement('td');
+    tdPrice.textContent = item.price || '';
 
-    // 打开
-    const tdOpen = document.createElement("td");
-    tdOpen.style.width = "70px";
-    if (row.url) {
-      const a = document.createElement("a");
-      a.href = row.url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = "open";
+    const tdOpen = document.createElement('td');
+    if (item.url) {
+      const a = document.createElement('a');
+      a.href = item.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = T.open;
       tdOpen.appendChild(a);
     }
-    tr.appendChild(tdOpen);
 
-    if ($tbody) $tbody.appendChild(tr);
-    return row;
+    tr.append(tdIdx, tdSku, tdImg, tdDesc, tdPrice, tdOpen);
+    $tbody.appendChild(tr);
+  });
+
+  // 激活懒加载
+  ensureLazy();
+};
+
+/** ---------- 业务：抓取 ---------- */
+const fetchCatalog = async () => {
+  const url = ($url && $url.value.trim()) || '';
+  const limit = toNumber($limit && $limit.value);
+  if (!url) return;
+
+  setStatus(T.fetching, false);
+  try {
+    const apiUrl = `${apiBase}/catalog/parse?url=${encodeURIComponent(url)}&limit=${limit}`;
+    const data = await fetchJSON(apiUrl, { method: 'GET', credentials: 'omit' });
+
+    // 兼容网关返回结构（items / rows / data）
+    const rows =
+      data.rows ||
+      data.items ||
+      data.data ||
+      []; // 每项建议字段：{ sku, title, price, img, url }
+
+    renderRows(rows);
+    setStatus(T.ok, true);
+  } catch (err) {
+    console.error(err);
+    setStatus(T.failed + (err.message || String(err)), false);
   }
+};
 
-  async function fetchCatalog() {
-    try {
-      const url = ($url && $url.value) || "";
-      const limit = asInt(($limit && $limit.value), 50);
-      if (!url) {
-        setStatus("请输入目录链接", "warn");
-        return;
-      }
-      setStatus("抓取中…", "info");
+/** ---------- 业务：导出 ---------- */
+const exportXlsx = async () => {
+  const url = ($url && $url.value.trim()) || '';
+  const limit = toNumber($limit && $limit.value);
+  if (!url) return;
 
-      const parseUrl = buildParseURL(url, limit);
-      const resp = await fetch(parseUrl, { mode: "cors" });
-      if (!resp.ok) {
-        setStatus("抓取失败: " + resp.status, "error");
-        return;
-      }
-      const data = await resp.json();
-      // 标准返回：{ ok, url, count, items[], rows[] }
-      const items = data.rows || data.items || data.data || [];
-      if (!Array.isArray(items) || items.length === 0) {
-        setStatus("没有解析到数据", "warn");
-        return;
-      }
+  try {
+    setStatus(T.fetching, false);
 
-      // 渲染
-      if ($tbody) $tbody.innerHTML = "";
-      currentRows = [];
-      items.forEach((it, i) => {
-        const r = renderRow(i, it);
-        currentRows.push(r);
+    // 关键点：POST /export-xlsx（JSON），不要走 /v1/export-xlsx；返回 Blob（xlsx）
+    const resp = await fetch(`${apiBase}/export-xlsx`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url, limit, lang: LANG }),
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status} ${resp.statusText} - ${txt.slice(0, 200)}`);
+    }
+
+    const blob = await resp.blob();
+    const name = 'export.xlsx';
+    downloadBlob(blob, name);
+    setStatus(T.ok, true);
+  } catch (err) {
+    console.error(err);
+    setStatus(T.failed + (err.message || String(err)), false);
+  }
+};
+
+/** ---------- 业务：清空 ---------- */
+const clearAll = () => {
+  if ($tbody) $tbody.innerHTML = '';
+  setStatus(T.cleared, true);
+};
+
+/** ---------- 事件绑定 ---------- */
+if ($btnFetch) $btnFetch.addEventListener('click', fetchCatalog);
+if ($btnExport) $btnExport.addEventListener('click', exportXlsx);
+if ($btnClear) $btnClear.addEventListener('click', clearAll);
+
+/** ---------- 初始化 ---------- */
+(() => {
+  renderHeader();
+  setStatus(T.ready, true);
+
+  // 页面语言按钮（如果页面有对应 id）
+  const bindLang = (id, lang) => {
+    const el = qs(id);
+    if (el) {
+      el.addEventListener('click', () => {
+        localStorage.setItem('mvp_lang', lang);
+        location.reload();
       });
-
-      setStatus(`Fetched: ${items.length}/${data.count ?? items.length}`);
-      if ($okbar) {
-        $okbar.style.display = "";
-        $okbar.textContent = "ok";
-      }
-    } catch (e) {
-      setStatus("抓取失败：Failed to fetch", "error");
     }
-  }
-
-  async function exportExcel() {
-    if (!currentRows.length) {
-      setStatus("没有可导出的数据", "warn");
-      return;
-    }
-    setStatus("导出中…", "info");
-    try {
-      // 优先网关，失败本地
-      await window.ExportXlsx.export(
-        currentRows,
-        "export.xlsx",
-        apiBase
-      );
-      setStatus("导出完成", "info");
-    } catch (e) {
-      setStatus("导出失败", "error");
-    }
-  }
-
-  // 事件
-  if ($btnFetch) $btnFetch.addEventListener("click", fetchCatalog);
-  if ($btnExport) $btnExport.addEventListener("click", exportExcel);
-  if ($btnClear) $btnClear.addEventListener("click", clearTable);
-
-  // 语言切换按钮（如果页面上有）
-  const $btnLangZh = document.querySelector("#btnLangZh");
-  const $btnLangDe = document.querySelector("#btnLangDe");
-  const $btnLangEn = document.querySelector("#btnLangEn");
-  const saveLang = (v) => localStorage.setItem("mvp_lang", v);
-  if ($btnLangZh) $btnLangZh.addEventListener("click", () => saveLang("zh"));
-  if ($btnLangDe) $btnLangDe.addEventListener("click", () => saveLang("de"));
-  if ($btnLangEn) $btnLangEn.addEventListener("click", () => saveLang("en"));
-
-  // 初始化
-  if ($status && !$status.textContent) setStatus("Ready", "info");
+  };
+  bindLang('#btnLangZh', 'zh');
+  bindLang('#btnLangDe', 'de');
+  bindLang('#btnLangEn', 'en');
 })();
