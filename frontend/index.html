@@ -1,88 +1,67 @@
-<!doctype html>
-<html lang="zh">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- 网关基址：可被 ?api=xxx 覆盖；此处推荐 **不带 /api**，保持 /v1 为根  -->
-  <meta name="api-base" content="https://yunivera-gateway.onrender.com/v1" />
-  <!-- 是否开启前端增强（表格渲染、导出等） -->
-  <meta name="ui-enhance" content="on" />
-
-  <title>云贸星 · 智能表格生成器</title>
-
-  <!-- 一点点“无依赖”的极简样式，恢复页面框架观感 -->
-  <style>
-    :root{--bg:#f6f7fb;--fg:#1f2d3d;--muted:#8a94a6;--brand:#2563eb;--border:#e6e8ef}
-    *{box-sizing:border-box}
-    html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:14px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-    .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
-    .toolbar{display:flex;gap:8px;align-items:center;margin:12px 0}
-    input[type="text"]{width:520px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff}
-    input[type="number"]{width:80px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff}
-    .btn{padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:#fff;cursor:pointer}
-    .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
-    .btn:hover{filter:brightness(.98)}
-    .card{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-    .card-head{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border)}
-    .status{font-size:12px;color:var(--muted)}
-    table{width:100%;border-collapse:collapse}
-    th,td{padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:top}
-    th{background:#fafbff;color:#4b5563;font-weight:600}
-    .img{width:72px;height:72px;border:1px solid var(--border);border-radius:10px;object-fit:cover;background:#fff}
-    .link{display:inline-block;padding:2px 6px;border:1px dashed var(--border);border-radius:8px}
-    .muted{color:var(--muted)}
-    .ok{color:#16a34a}.warn{color:#d97706}.err{color:#dc2626}
-  </style>
-
-  <script>
-    // 供 ui-enhance.plus.js 读取的开关与模块位置（不改按钮行为）
-    window.UI_ENHANCE = {
-      enhance: true,
-      // 注意：export 模块我们放在 frontend/public/ 下，便于 Vite 解析
-      exportModule: './public/export-xlsx.js'
-    };
-  </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Yunivera · System Frozen for Legal Review</title>
+    <style>
+        body {
+            margin: 0;
+            background: #f5f6fa;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #333;
+        }
+        .container {
+            text-align: center;
+            max-width: 600px;
+        }
+        h1 {
+            font-size: 28px;
+            margin-bottom: 12px;
+        }
+        p {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #555;
+        }
+        .notice {
+            margin-top: 25px;
+            padding: 12px;
+            border-left: 4px solid #cc0000;
+            background: #fff3f3;
+            font-size: 14px;
+            color: #800000;
+        }
+        footer {
+            margin-top: 24px;
+            font-size: 12px;
+            color: #888;
+        }
+    </style>
 </head>
 
 <body>
-  <div class="wrap">
-    <h2 style="margin:0 0 8px 0">云贸星 · 智能表格生成器</h2>
-    <p class="muted" style="margin:0 0 14px 0">输入目录型网页链接，秒生成 Excel 产品表格。</p>
+    <div class="container">
+        <h1>🔒 Yunivera System Access Frozen</h1>
+        <p>
+            To comply with international AI safety governance procedures and patent review requirements,
+            this system is temporarily unavailable.
+        </p>
+        <p>
+            Public access will resume only after legal approval, regulatory alignment,
+            and compliance certification.
+        </p>
+        
+        <div class="notice">
+            No system data, functionality, or source code will be restored, executed, or disclosed
+            during the freeze period.
+        </div>
 
-    <div class="toolbar">
-      <input id="txtUrl" type="text" placeholder="https://example.com/catalog/..." />
-      <input id="txtLimit" type="number" min="1" max="500" value="50" />
-      <button id="btnFetch" class="btn primary">抓取目录</button>
-      <button id="btnExport" class="btn">导出 Excel（.xlsx）</button>
-      <button id="btnClear" class="btn">清空数据</button>
+        <footer>© Yunivera. Regulatory Freeze v1.0</footer>
     </div>
-
-    <div class="card">
-      <div class="card-head">
-        <div class="status" id="status">准备就绪</div>
-        <div class="status muted" id="okbar" style="display:none;">ok</div>
-      </div>
-
-      <div class="card-body" style="padding:8px 12px 14px 12px;">
-        <table id="tbl">
-          <thead>
-            <tr>
-              <th style="width:48px;">#</th>
-              <th style="width:110px;">货号</th>
-              <th style="width:110px;">图片</th>
-              <th>描述</th>
-              <th style="width:90px;">单价</th>
-              <th style="width:70px;">打开</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- 只加载 plus 入口；老的 ui-enhance.js 仍保留在仓库，无需引用 -->
-  <script type="module" src="./public/ui-enhance.plus.js?enhance=1"></script>
 </body>
 </html>
