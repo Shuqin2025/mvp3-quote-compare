@@ -4,8 +4,6 @@ This directory preserves historical governance documents for transparency and au
 
 The archived materials reflect prior governance states of the Yunivera system and are retained for record continuity.
 
----
-
 ## Regulatory Freeze (v1.0)
 
 ### Period
@@ -26,8 +24,6 @@ Its purpose was to:
 The freeze was preventative in nature and did not result from regulatory enforcement or compliance violation.
 
 No regulatory violations occurred.
-
----
 
 ### Operational Conditions During Freeze
 
@@ -59,23 +55,20 @@ The transition reflects:
 
 The system transitioned from reactive freeze posture to proactive structural governance.
 
----
-
 ### Approval Authority
 
 The transition from Regulatory Freeze (v1.0) to Strategic Pause (v2.0) was internally authorized under project governance authority.
 
 No external regulatory directive was involved.
 
----
-
 ### Governance Timeline
 
+Shuqin2025-patch-1
 - 20.11.2025 — Regulatory Freeze initiated
+- 2025 — Regulatory Freeze initiated
+feature/restore-mvp
 - 17.02.2026 — Strategic Pause declared
 - 17.02.2026 — Governance v2.0 framework established
-
----
 
 This archive is maintained for transparency and historical continuity.
 Archived governance states do not reflect current operational posture.
