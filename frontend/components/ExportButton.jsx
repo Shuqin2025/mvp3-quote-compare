@@ -1,25 +1,46 @@
-
 // /frontend/components/ExportButton.jsx
-import React from 'react';
-import { exportToXlsxByItems } from '../../export-xlsx.js';
+import React from "react";
 
-const ExportButton = ({ items = [], withImages = true, filename = '商品数据导出.xlsx' }) => {
+const ExportButton = ({
+  items = [],
+  withImages = true,
+  filename = "excel_catalog_en_demo.xlsx",
+  apiBase = "",
+}) => {
   const onExport = async () => {
-    if (!items || items.length === 0) {
-      alert('没有数据可导出');
+    if (!Array.isArray(items) || items.length === 0) {
+      alert("No exportable data available.");
       return;
     }
+
+    if (
+      typeof window === "undefined" ||
+      !window.ExportXlsx ||
+      typeof window.ExportXlsx.export !== "function"
+    ) {
+      alert("Export module is not loaded.");
+      return;
+    }
+
     try {
-      await exportToXlsxByItems({ items, withImages, filename });
+      await window.ExportXlsx.export(items, filename, apiBase, {
+        withImages,
+        lang: "en",
+      });
     } catch (err) {
-      console.error('导出失败：', err);
-      alert('导出失败，请查看控制台日志');
+      console.error("[ExportButton] export failed:", err);
+      alert("Export failed. Please check the browser console.");
     }
   };
 
   return (
-    <button onClick={onExport} className="btn btn-primary" style={{ marginBottom: '10px' }}>
-      ⬇ 导出 Excel（含图片）
+    <button
+      onClick={onExport}
+      className="btn btn-primary"
+      style={{ marginBottom: "10px" }}
+      type="button"
+    >
+      ⇩ Export Excel (Schema v1.1)
     </button>
   );
 };
