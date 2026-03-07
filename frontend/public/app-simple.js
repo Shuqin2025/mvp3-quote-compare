@@ -1,7 +1,7 @@
-// app-simple.js — 单页 UI + i18n + Excel(内嵌图片)
+// app-simple.js — 单页 UI + i18n + Excel(业务版导出优先)
 // 统一拼接规则：实际请求 = API_BASE + API_PREFIX(可能为''或'/v1') + (USE_API ? '/api' : '') + endpoint
-// endpoint 例子：/catalog/parse、/image64、/health
-// last-mod: 2025-10-27 gateway-integration-stable
+// endpoint 例子：/catalog/parse、/image64、/health、/export/xlsx
+// last-mod: 2026-03-07 business-export-v1.1
 
 (() => {
   'use strict';
@@ -29,7 +29,6 @@
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
 
   // 我们的公网网关（Render 上暴露给浏览器访问的服务）
-  // 这是我们已经亲手验证“能拿到catalog结果不返回404”的网关 host
   const FALLBACK_GATEWAY = 'https://yunivera-gateway.onrender.com';
 
   // 最终 API_BASE = 网关根，比如 https://yunivera-gateway.onrender.com
@@ -50,13 +49,6 @@
   window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
 
   // ───────────────── 自动探测 (/v1? /api?) ─────────────────
-  // 我们的目标是自动判断两件事：
-  //   1) API_PREFIX 是 '' 还是 '/v1'
-  //   2) USE_API    是否要额外加 '/api'
-  //
-  // 真正上线的 yunivera-gateway 里，实际路由是 /v1/api/catalog/parse /v1/api/health /v1/api/image64
-  // 所以我们默认就是 '/v1' + '/api'
-  //
   let API_PREFIX = '/v1';
   let USE_API = true;
 
@@ -64,12 +56,6 @@
   window.__USE_API__    = USE_API;
 
   async function detectPrefix() {
-    // 我们做一个“智能回退”：
-    // 1. 先试 /v1/api/health
-    // 2. 再试 /v1/health
-    // 3. 最后试 /health
-    //
-    // 哪个最先返回 r.ok === true，我们就采用哪个组合
     const tries = [
       { pfx: '/v1', useApi: true,  url: `${API_BASE}/v1/api/health`   },
       { pfx: '/v1', useApi: false, url: `${API_BASE}/v1/health`       },
@@ -90,9 +76,6 @@
         // ignore, we'll fall through to defaults
       }
     }
-
-    // 如果全都不通，保持默认 (/v1 + /api)。即使 health 探测失败，
-    // 真实抓取 /v1/api/catalog/parse 还是会成功（我们手动验证过）。
   }
 
   // 根据 endpoint 组最终请求 URL
@@ -111,7 +94,7 @@
       export:'导出 Excel（.xlsx）',
       clear:'清空数据',
       th:['#','货号','图片','描述','起订量','单价','链接'],
-      okExport:'已导出 Excel（含图片、价格占位符）。',
+      okExport:'已导出 Excel（Schema v1.1）。',
       success:(n,m)=>`抓取成功：共 ${n} 条（预览前 ${m} 条）`,
       pleaseFetch:'请先抓取目录再导出。',
       linkText:'链接',
@@ -129,7 +112,7 @@
       export:'Excel exportieren (.xlsx)',
       clear:'Daten leeren',
       th:['#','Artikel-Nr.','Bild','Beschreibung','MOQ','Einzelpreis','Link'],
-      okExport:'Excel exportiert (mit Bildern).',
+      okExport:'Excel exportiert (Schema v1.1).',
       success:(n,m)=>`Erfolg: Insgesamt ${n} Einträge (zeige ${m}).`,
       pleaseFetch:'Bitte zuerst Katalog abrufen.',
       linkText:'Link',
@@ -147,7 +130,7 @@
       export:'Export Excel (.xlsx)',
       clear:'Clear',
       th:['#','Item No.','Picture','Description','MOQ','Unit Price','Link'],
-      okExport:'Excel exported (with images).',
+      okExport:'Excel exported (Schema v1.1).',
       success:(n,m)=>`Success: ${n} items (showing ${m}).`,
       pleaseFetch:'Fetch catalog before export.',
       linkText:'Link',
@@ -285,8 +268,6 @@
       if (btn)    { btn.disabled = true; btn.textContent = t.fetch + '…'; }
       if (status) { status.textContent = t.loading; }
 
-      // 拼最终接口：/catalog/parse?url=...&limit=...
-      // 真正发送到： https://yunivera-gateway.onrender.com/v1/api/catalog/parse?url=...&limit=...
       const ep = buildApi('/catalog/parse') +
         `?url=${encodeURIComponent(url)}&limit=${limit}`;
 
@@ -299,7 +280,6 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
 
-      // 如果后端的适配器告诉我们这是“纯链接页”而不是商品目录
       const adapter = j?.adapter || j?.type;
       const prelim = Array.isArray(j?.items) && j.items.length
         ? j.items
@@ -317,7 +297,6 @@
         return;
       }
 
-      // 把后端返回的产品投射成我们表格的列
       const list = Array.isArray(j?.items) && j.items.length
         ? j.items
         : (Array.isArray(j?.products) ? j.products : []);
@@ -348,122 +327,199 @@
     }
   }
 
-  // ───────────────── 导出 Excel（把图也塞进 .xlsx） ─────────────────
+  // ───────────────── 业务版 Excel 导出（优先后端，失败再本地兜底） ─────────────────
   async function doExport() {
     const t = i18n[lang];
 
     if (!rows.length) { alert(t.pleaseFetch); return; }
-    if (!window.ExcelJS) { alert('ExcelJS not loaded'); return; }
-    const ExcelJS = window.ExcelJS;
 
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Catalog');
+    const langForExport = 'en';
+    const filenameBase = 'excel_catalog_en_demo';
+    const exportUrl = buildApi('/export/xlsx') + `?lang=${encodeURIComponent(langForExport)}`;
 
-    ws.columns = [
-      { header: i18n[lang].th[1], key: 'sku',   width: 18 },
-      { header: i18n[lang].th[2], key: 'pic',   width: 22 },
-      { header: i18n[lang].th[3], key: 'title', width: 60 },
-      { header: i18n[lang].th[4], key: 'moq',   width: 10 },
-      { header: i18n[lang].th[5], key: 'price', width: 14 },
-      { header: i18n[lang].th[6], key: 'link',  width: 12 },
-    ];
-    ws.getRow(1).font = { bold: true };
+    const payload = {
+      items: rows.map(r => ({
+        sku: r.sku || '',
+        img: r.img || '',
+        title: r.title || '',
+        moq: r.moq && r.moq !== '—' ? r.moq : '',
+        price: r.price || '',
+        url: r.url || '',
+        itemNo: r.sku || '',
+        picture: r.img || '',
+        description: r.title || '',
+        unitPrice: r.price || '',
+        link: r.url || '',
+      })),
+      filename: filenameBase,
+      withImages: true,
+      schemaVersion: 'excel_catalog_schema_v1.1',
+    };
 
-    const metas = [];
-    for (const r of rows) {
-      const rr = ws.addRow({
-        sku:   r.sku || '',
-        pic:   '',
-        title: r.title,
-        moq:   r.moq,
-        price: r.price,
-        link:  r.url ? { text: i18n[lang].linkText, hyperlink: r.url } : '',
+    try {
+      const resp = await fetch(exportUrl, {
+        method: 'POST',
+        mode: 'cors',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lang': langForExport,
+          ...AUTH_HEADERS,
+        },
+        body: JSON.stringify(payload),
       });
-      rr.height = 78;
-      metas.push({ row: rr.number, img: r.img });
-    }
 
-    // 把 <img src="data:image/...base64"> 或普通 URL 转成真正的图片放进 Excel
-    const parseDataUrl = (dataURL) => {
-      const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
-      if (!m) return null;
-      const ct = m[1].toLowerCase();
-      let ext = 'jpeg';
-      if (ct.includes('png'))   ext = 'png';
-      else if (ct.includes('webp')) ext = 'webp';
-      else if (ct.includes('gif'))  ext = 'gif';
-      else if (ct.includes('bmp'))  ext = 'bmp';
-      return { raw: m[2], ext };
-    };
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-    const guessExtFromUrl = (u='') => {
-      const low = u.toLowerCase();
-      if (/\.(png)(\?|#|$)/.test(low))  return 'png';
-      if (/\.(webp)(\?|#|$)/.test(low)) return 'webp';
-      if (/\.(gif)(\?|#|$)/.test(low))  return 'gif';
-      if (/\.(bmp)(\?|#|$)/.test(low))  return 'bmp';
-      return 'jpeg';
-    };
+      const blob = await resp.blob();
+      const cd = resp.headers.get('content-disposition') || '';
+      let filename = `${filenameBase}.xlsx`;
 
-    async function fetchB64ViaServer(imgUrl) {
-      // 让后端把图片转成纯base64，不触发浏览器跨域复杂逻辑
-      const r = await fetch(
-        buildApi('/image64') + `?url=${encodeURIComponent(imgUrl)}`,
-        { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } }
-      );
-      if (!r.ok) throw new Error(`image64 HTTP ${r.status}`);
-      const raw = await r.text(); // 纯 base64 字符串
-      const ext = guessExtFromUrl(imgUrl);
-      return { raw, ext };
-    }
-
-    for (const m of metas) {
-      try {
-        let ext, raw;
-        const parsed = parseDataUrl(m.img);
-        if (parsed) { ext = parsed.ext; raw = parsed.raw; }
-        if (!raw && m.img) {
-          const p = await fetchB64ViaServer(m.img);
-          ext = p.ext;
-          raw = p.raw;
-        }
-        if (!raw) continue;
-
-        const id = wb.addImage({
-          base64: raw,
-          extension: ext || 'jpeg',
-        });
-
-        const r0 = m.row - 1;
-        ws.addImage(id, {
-          tl:   { col: 1, row: r0 },
-          ext:  { width: 120, height: 70 },
-          editAs: 'oneCell',
-        });
-      } catch (e) {
-        console.warn('embed image failed:', m.img, e?.message || e);
+      const m1 = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+      const m2 = /filename="?([^";]+)"?/i.exec(cd);
+      if (m1 && m1[1]) {
+        try { filename = decodeURIComponent(m1[1]); } catch {}
+      } else if (m2 && m2[1]) {
+        filename = m2[1];
       }
+
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(a.href);
+      a.remove();
+
+      const ok = $('#okbar');
+      if (ok) {
+        ok.textContent = t.okExport;
+        ok.style.display = 'block';
+        setTimeout(() => { ok.style.display = 'none'; }, 2200);
+      }
+      return;
+    } catch (e) {
+      console.warn('[export business route failed, fallback local]', e?.message || e);
     }
 
-    const filename =
-      `catalog-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now()}.xlsx`;
-    const buf  = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buf], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    URL.revokeObjectURL(a.href);
-    a.remove();
+    // ── 本地兜底导出：保持当前页面始终可演示 ──
+    if (!window.ExcelJS) {
+      alert(t.failExport('ExcelJS not loaded'));
+      return;
+    }
 
-    const ok = $('#okbar');
-    if (ok) {
-      ok.textContent = t.okExport;
-      ok.style.display = 'block';
-      setTimeout(() => { ok.style.display = 'none'; }, 2000);
+    try {
+      const ExcelJS = window.ExcelJS;
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Catalog');
+
+      ws.columns = [
+        { header: '#',           key: 'idx',   width: 6  },
+        { header: 'Item No.',    key: 'sku',   width: 18 },
+        { header: 'Picture',     key: 'pic',   width: 22 },
+        { header: 'Description', key: 'title', width: 60 },
+        { header: 'MOQ',         key: 'moq',   width: 10 },
+        { header: 'Unit Price',  key: 'price', width: 14 },
+        { header: 'Link',        key: 'link',  width: 12 },
+      ];
+      ws.getRow(1).font = { bold: true };
+
+      const metas = [];
+      for (const [i, r] of rows.entries()) {
+        const rr = ws.addRow({
+          idx:   i + 1,
+          sku:   r.sku || '',
+          pic:   '',
+          title: r.title || '',
+          moq:   r.moq && r.moq !== '—' ? r.moq : '',
+          price: r.price || '',
+          link:  r.url ? { text: 'Link', hyperlink: r.url } : '',
+        });
+        rr.height = 78;
+        metas.push({ row: rr.number, img: r.img });
+      }
+
+      const parseDataUrl = (dataURL) => {
+        const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(dataURL || '');
+        if (!m) return null;
+        const ct = m[1].toLowerCase();
+        let ext = 'jpeg';
+        if (ct.includes('png')) ext = 'png';
+        else if (ct.includes('webp')) ext = 'webp';
+        else if (ct.includes('gif')) ext = 'gif';
+        else if (ct.includes('bmp')) ext = 'bmp';
+        return { raw: m[2], ext };
+      };
+
+      const guessExtFromUrl = (u='') => {
+        const low = u.toLowerCase();
+        if (/\.(png)(\?|#|$)/.test(low)) return 'png';
+        if (/\.(webp)(\?|#|$)/.test(low)) return 'webp';
+        if (/\.(gif)(\?|#|$)/.test(low)) return 'gif';
+        if (/\.(bmp)(\?|#|$)/.test(low)) return 'bmp';
+        return 'jpeg';
+      };
+
+      async function fetchB64ViaServer(imgUrl) {
+        const r = await fetch(
+          buildApi('/image64') + `?url=${encodeURIComponent(imgUrl)}`,
+          { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } }
+        );
+        if (!r.ok) throw new Error(`image64 HTTP ${r.status}`);
+        const raw = await r.text();
+        const ext = guessExtFromUrl(imgUrl);
+        return { raw, ext };
+      }
+
+      for (const m of metas) {
+        try {
+          let ext, raw;
+          const parsed = parseDataUrl(m.img);
+          if (parsed) { ext = parsed.ext; raw = parsed.raw; }
+          if (!raw && m.img) {
+            const p = await fetchB64ViaServer(m.img);
+            ext = p.ext;
+            raw = p.raw;
+          }
+          if (!raw) continue;
+
+          const id = wb.addImage({
+            base64: raw,
+            extension: ext || 'jpeg',
+          });
+
+          const r0 = m.row - 1;
+          ws.addImage(id, {
+            tl:   { col: 2, row: r0 },
+            ext:  { width: 120, height: 70 },
+            editAs: 'oneCell',
+          });
+        } catch (e) {
+          console.warn('embed image failed:', m.img, e?.message || e);
+        }
+      }
+
+      const filename = `${filenameBase}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now()}.xlsx`;
+      const buf  = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(a.href);
+      a.remove();
+
+      const ok = $('#okbar');
+      if (ok) {
+        ok.textContent = `${t.okExport} (local fallback)`;
+        ok.style.display = 'block';
+        setTimeout(() => { ok.style.display = 'none'; }, 2200);
+      }
+    } catch (e) {
+      console.error(e);
+      alert(t.failExport(e.message || e));
     }
   }
 
@@ -477,15 +533,12 @@
     $('#status') && ($('#status').textContent = i18n[lang].uiNoData);
   });
 
-  // 回车也可以触发抓取
   $('#url')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doFetch();
   });
 
-  // 启动时先尝试自动探测 prefix (/v1? /api?)
   detectPrefix().catch(()=>{});
 
-  // 轻量健康检查（不会阻塞主流程）
   (async () => {
     try {
       const r = await fetch(buildApi('/health'), { mode: 'cors' });
