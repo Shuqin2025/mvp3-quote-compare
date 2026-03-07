@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="api-base" content="https://yunivera-gateway.onrender.com" />
+  <title>Yunivera · Internal Demo</title>
+
+  <link rel="stylesheet" href="./public/ui-enhance.css" />
+
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --line: #d9dee7;
+      --blue: #2563eb;
+      --blue-hover: #1d4ed8;
+      --soft: #fff6db;
+      --soft-line: #e8c969;
+      --ok: #e8f7ea;
+      --ok-line: #57a86b;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 20px 40px;
+    }
+
+    .demo-badge {
+      display: inline-block;
+      margin-bottom: 14px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #eef3ff;
+      color: #3157b7;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+
+    #langbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    #langbar button {
+      min-width: 92px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 15px;
+    }
+
+    .hero {
+      margin-bottom: 20px;
+    }
+
+    #title {
+      margin: 0 0 8px;
+      font-size: 42px;
+      line-height: 1.15;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+
+    #subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .yx-workbench {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .yx-controls,
+    .yx-preview {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 8px 26px rgba(16, 24, 40, 0.04);
+    }
+
+    .yx-controls {
+      padding: 18px;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #url {
+      width: 100%;
+      height: 50px;
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font-size: 16px;
+      outline: none;
+      background: #fff;
+    }
+
+    #url:focus,
+    #limit:focus {
+      border-color: #92b2ff;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+
+    #limit {
+      height: 50px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      font-size: 16px;
+    }
+
+    #btnFetch,
+    #btnExport,
+    #btnClear {
+      height: 50px;
+      padding: 0 18px;
+      border-radius: 12px;
+      font-size: 16px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #btnFetch {
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      font-weight: 700;
+    }
+
+    #btnFetch:hover { background: var(--blue-hover); }
+
+    #btnExport,
+    #btnClear {
+      background: #fff;
+      color: #111827;
+      border: 1px solid var(--line);
+      font-weight: 600;
+    }
+
+    #btnExport:hover,
+    #btnClear:hover {
+      background: #f8fafc;
+    }
+
+    #status {
+      margin-top: 12px;
+      padding: 14px 16px;
+      border: 1px solid var(--soft-line);
+      background: var(--soft);
+      color: #7c5a00;
+      border-radius: 12px;
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      font-size: 15px;
+    }
+
+    #okbar {
+      display: none;
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--ok-line);
+      background: var(--ok);
+      color: #155724;
+      border-radius: 12px;
+      font-size: 14px;
+    }
+
+    .yx-preview {
+      padding: 14px;
+    }
+
+    .preview-title {
+      margin: 2px 2px 14px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid #e7eaf0;
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    #tbl {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+    }
+
+    #tbl th,
+    #tbl td {
+      border-bottom: 1px solid #edf1f6;
+      padding: 12px 10px;
+      vertical-align: middle;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    #tbl thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f8fafc;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    #tbl tbody tr:hover {
+      background: #fafcff;
+    }
+
+    #tbl td:nth-child(1),
+    #tbl td:nth-child(5),
+    #tbl td:nth-child(6) {
+      white-space: nowrap;
+    }
+
+    #tbl img {
+      max-width: 110px;
+      max-height: 76px;
+      object-fit: contain;
+      display: block;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .note {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 980px) {
+      .control-row {
+        grid-template-columns: 1fr;
+      }
+
+      #btnFetch,
+      #btnExport,
+      #btnClear,
+      #limit,
+      #url {
+        width: 100%;
+      }
+
+      #title {
+        font-size: 32px;
+      }
+
+      #subtitle {
+        font-size: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="demo-badge">Internal Demo · Excel Catalog Schema v1.1</div>
+
+    <div id="langbar" aria-label="Language switcher">
+      <button type="button" data-lang="zh">CN 中文</button>
+      <button type="button" data-lang="de">DE Deutsch</button>
+      <button type="button" data-lang="en">GB English</button>
+    </div>
+
+    <section class="hero">
+      <h1 id="title">Yunivera · Smart Sheet Builder</h1>
+      <p id="subtitle">Paste a catalog URL and instantly create an Excel sheet.</p>
+    </section>
+
+    <main class="yx-workbench">
+      <section class="yx-controls">
+        <div class="control-row">
+          <input
+            id="url"
+            type="url"
+            placeholder="Paste a category/listing page URL here"
+            autocomplete="off"
+          />
+
+          <select id="limit" aria-label="Result limit">
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+
+          <button id="btnFetch" type="button">Fetch Catalog</button>
+          <button id="btnExport" type="button">Export Excel (.xlsx)</button>
+        </div>
+
+        <div class="control-row" style="grid-template-columns: 1fr auto; margin-top: 10px;">
+          <div id="status">ui_no_data</div>
+          <button id="btnClear" type="button">Clear</button>
+        </div>
+
+        <div id="okbar" aria-live="polite"></div>
+
+        <div class="note">
+          Controlled demo entry only. Public homepage remains frozen by design.
+        </div>
+      </section>
+
+      <section class="yx-preview">
+        <div class="preview-title">Preview</div>
+        <div class="table-wrap">
+          <table id="tbl">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Item No.</th>
+                <th>Picture</th>
+                <th>Description</th>
+                <th>MOQ</th>
+                <th>Unit Price</th>
+                <th>Link</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    window.__API_BASE__ = new URLSearchParams(location.search).get('api') || 'https://yunivera-gateway.onrender.com';
+  </script>
+
+  <script src="./public/export-xlsx.js"></script>
+  <script src="./public/app-simple.js"></script>
+</body>
+</html>
