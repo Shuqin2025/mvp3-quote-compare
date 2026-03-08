@@ -6,6 +6,18 @@
   <meta name="api-base" content="https://yunivera-gateway.onrender.com" />
   <title>Yunivera · Internal Demo</title>
 
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const demoKey = params.get("demo");
+      const DEMO_KEY = "yunivera";
+
+      if (demoKey !== DEMO_KEY) {
+        window.location.replace("/index.html");
+      }
+    })();
+  </script>
+
   <link rel="stylesheet" href="./public/ui-enhance.css" />
 
   <style>
