@@ -1,7 +1,7 @@
 // app-simple.js — 单页 UI + i18n + Excel(业务版导出优先)
 // 统一拼接规则：实际请求 = API_BASE + API_PREFIX(可能为''或'/v1') + (USE_API ? '/api' : '') + endpoint
 // endpoint 例子：/catalog/parse、/image64、/health、/export/xlsx
-// last-mod: 2026-03-07 business-export-v1.1
+// last-mod: 2026-03-08 demo-query-fix
 
 (() => {
   'use strict';
@@ -11,7 +11,11 @@
 
   // ───────────────── 读取 API_BASE / 网关地址 ─────────────────
   // 来源优先级：（URL ?api=...）> window 变量 > <meta> > fallback
-  const apiParam = new URLSearchParams(location.search).get('api');
+  const qs = new URLSearchParams(location.search);
+  const apiParam = qs.get('api');
+  const demoParam = qs.get('demo');
+  const DEMO_MODE = demoParam === 'yunivera' ? 'yunivera' : '';
+
   const fromBoot =
     (typeof window !== 'undefined') &&
     (window.__API_BASE__ ||
@@ -20,11 +24,10 @@
 
   let fromEnv;
   try {
-    const hasImportMeta = (typeof import.meta !== 'undefined');
-    fromEnv = (hasImportMeta && import.meta?.env?.VITE_API_BASE)
-      ? import.meta.env.VITE_API_BASE
-      : undefined;
-  } catch { fromEnv = undefined; }
+    fromEnv = undefined;
+  } catch {
+    fromEnv = undefined;
+  }
 
   const fromMeta = document.querySelector('meta[name="api-base"]')?.content;
 
@@ -41,9 +44,10 @@
 
   // 方便在浏览器 Console 里确认当前网关
   window.__API_BASE_EFFECTIVE__ = API_BASE;
+  window.__DEMO_MODE__ = DEMO_MODE || '(none)';
 
   // ───────────────── 可选鉴权头（目前我们用不到，就保留后门） ─────────────────
-  const authParam = new URLSearchParams(location.search).get('auth');
+  const authParam = qs.get('auth');
   const AUTH = authParam ? String(authParam) : '';
   const AUTH_HEADERS = AUTH ? { Authorization: AUTH } : {};
   window.__API_AUTH_EFFECTIVE__ = AUTH || '(none)';
@@ -53,23 +57,34 @@
   let USE_API = true;
 
   window.__API_PREFIX__ = API_PREFIX;
-  window.__USE_API__    = USE_API;
+  window.__USE_API__ = USE_API;
+
+  function withDemo(url) {
+    const u = new URL(url, location.origin);
+    if (DEMO_MODE) u.searchParams.set('demo', DEMO_MODE);
+    return u.toString();
+  }
 
   async function detectPrefix() {
     const tries = [
-      { pfx: '/v1', useApi: true,  url: `${API_BASE}/v1/api/health`   },
-      { pfx: '/v1', useApi: false, url: `${API_BASE}/v1/health`       },
-      { pfx: '',    useApi: false, url: `${API_BASE}/health`          },
+      { pfx: '/v1', useApi: true,  url: withDemo(`${API_BASE}/v1/api/health`) },
+      { pfx: '/v1', useApi: false, url: withDemo(`${API_BASE}/v1/health`) },
+      { pfx: '',    useApi: false, url: withDemo(`${API_BASE}/health`) },
     ];
 
     for (const t of tries) {
       try {
-        const r = await fetch(t.url, { mode: 'cors' });
-        if (r.ok) {
+        const r = await fetch(t.url, {
+          mode: 'cors',
+          headers: { ...AUTH_HEADERS },
+        });
+
+        // demo 环境下 401 也代表“路由存在并到达了服务”，不能当成探测失败
+        if (r.ok || r.status === 401) {
           API_PREFIX = t.pfx;
-          USE_API    = t.useApi;
+          USE_API = t.useApi;
           window.__API_PREFIX__ = API_PREFIX;
-          window.__USE_API__    = USE_API;
+          window.__USE_API__ = USE_API;
           return;
         }
       } catch {
@@ -80,8 +95,18 @@
 
   // 根据 endpoint 组最终请求 URL
   // endpoint 必须以斜杠开头，例如 '/catalog/parse'
-  function buildApi(endpoint) {
-    return `${API_BASE}${API_PREFIX}${USE_API ? '/api' : ''}${endpoint}`;
+  function buildApi(endpoint, extraParams = null) {
+    const url = new URL(`${API_BASE}${API_PREFIX}${USE_API ? '/api' : ''}${endpoint}`);
+    if (DEMO_MODE) url.searchParams.set('demo', DEMO_MODE);
+
+    if (extraParams && typeof extraParams === 'object') {
+      for (const [k, v] of Object.entries(extraParams)) {
+        if (v !== undefined && v !== null && v !== '') {
+          url.searchParams.set(k, String(v));
+        }
+      }
+    }
+    return url.toString();
   }
 
   // ───────────────── i18n ─────────────────
@@ -223,7 +248,7 @@
 
   const firstImg = (x) => {
     if (x?.img_b64) return x.img_b64;
-    if (x?.img)    return x.img;
+    if (x?.img) return x.img;
     if (Array.isArray(x?.imgs) && x.imgs.length) return x.imgs[0];
     return '';
   };
@@ -235,7 +260,7 @@
     if (!tb) return;
     tb.innerHTML = rows.map((r, i) => `
       <tr>
-        <td>${i+1}</td>
+        <td>${i + 1}</td>
         <td>${r.sku || '—'}</td>
         <td>${
           r.img
@@ -257,19 +282,21 @@
   // ───────────────── 抓取目录按钮逻辑 ─────────────────
   async function doFetch() {
     const t = i18n[lang];
-    const btn    = $('#btnFetch');
+    const btn = $('#btnFetch');
     const status = $('#status');
 
     try {
-      const url   = ($('#url')?.value || '').trim();
+      const url = ($('#url')?.value || '').trim();
       if (!url) return;
       const limit = parseInt($('#limit')?.value || '50', 10) || 50;
 
-      if (btn)    { btn.disabled = true; btn.textContent = t.fetch + '…'; }
+      if (btn) { btn.disabled = true; btn.textContent = t.fetch + '…'; }
       if (status) { status.textContent = t.loading; }
 
-      const ep = buildApi('/catalog/parse') +
-        `?url=${encodeURIComponent(url)}&limit=${limit}`;
+      const ep = buildApi('/catalog/parse', {
+        url,
+        limit,
+      });
 
       const r = await fetch(ep, {
         method: 'GET',
@@ -284,6 +311,7 @@
       const prelim = Array.isArray(j?.items) && j.items.length
         ? j.items
         : (Array.isArray(j?.products) ? j.products : []);
+
       if (
         (adapter === 'generic-links' || adapter === 'GenericLinks') &&
         prelim.length === 0
@@ -302,12 +330,12 @@
         : (Array.isArray(j?.products) ? j.products : []);
 
       rows = list.map(x => ({
-        sku:   normalizeSku(x),
+        sku: normalizeSku(x),
         title: (x.title ?? '').toString().trim() || '—',
-        url:   x.url   || '',
-        img:   firstImg(x),
+        url: x.url || '',
+        img: firstImg(x),
         price: x.price || '',
-        moq:   (x.moq ?? '').toString().trim() || '—',
+        moq: (x.moq ?? '').toString().trim() || '—',
       }));
 
       renderTable();
@@ -331,11 +359,16 @@
   async function doExport() {
     const t = i18n[lang];
 
-    if (!rows.length) { alert(t.pleaseFetch); return; }
+    if (!rows.length) {
+      alert(t.pleaseFetch);
+      return;
+    }
 
     const langForExport = 'en';
     const filenameBase = 'excel_catalog_en_demo';
-    const exportUrl = buildApi('/export/xlsx') + `?lang=${encodeURIComponent(langForExport)}`;
+    const exportUrl = buildApi('/export/xlsx', {
+      lang: langForExport,
+    });
 
     const payload = {
       items: rows.map(r => ({
@@ -426,13 +459,13 @@
       const metas = [];
       for (const [i, r] of rows.entries()) {
         const rr = ws.addRow({
-          idx:   i + 1,
-          sku:   r.sku || '',
-          pic:   '',
+          idx: i + 1,
+          sku: r.sku || '',
+          pic: '',
           title: r.title || '',
-          moq:   r.moq && r.moq !== '—' ? r.moq : '',
+          moq: r.moq && r.moq !== '—' ? r.moq : '',
           price: r.price || '',
-          link:  r.url ? { text: 'Link', hyperlink: r.url } : '',
+          link: r.url ? { text: 'Link', hyperlink: r.url } : '',
         });
         rr.height = 78;
         metas.push({ row: rr.number, img: r.img });
@@ -461,7 +494,7 @@
 
       async function fetchB64ViaServer(imgUrl) {
         const r = await fetch(
-          buildApi('/image64') + `?url=${encodeURIComponent(imgUrl)}`,
+          buildApi('/image64', { url: imgUrl }),
           { method: 'GET', mode: 'cors', headers: { ...AUTH_HEADERS } }
         );
         if (!r.ok) throw new Error(`image64 HTTP ${r.status}`);
@@ -474,7 +507,10 @@
         try {
           let ext, raw;
           const parsed = parseDataUrl(m.img);
-          if (parsed) { ext = parsed.ext; raw = parsed.raw; }
+          if (parsed) {
+            ext = parsed.ext;
+            raw = parsed.raw;
+          }
           if (!raw && m.img) {
             const p = await fetchB64ViaServer(m.img);
             ext = p.ext;
@@ -489,8 +525,8 @@
 
           const r0 = m.row - 1;
           ws.addImage(id, {
-            tl:   { col: 2, row: r0 },
-            ext:  { width: 120, height: 70 },
+            tl: { col: 2, row: r0 },
+            ext: { width: 120, height: 70 },
             editAs: 'oneCell',
           });
         } catch (e) {
@@ -499,7 +535,7 @@
       }
 
       const filename = `${filenameBase}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now()}.xlsx`;
-      const buf  = await wb.xlsx.writeBuffer();
+      const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       });
@@ -524,10 +560,10 @@
   }
 
   // ───────────────── 事件绑定 ─────────────────
-  $('#btnFetch') ?.addEventListener('click', doFetch);
+  $('#btnFetch')?.addEventListener('click', doFetch);
   $('#btnExport')?.addEventListener('click', doExport);
 
-  $('#btnClear') ?.addEventListener('click', () => {
+  $('#btnClear')?.addEventListener('click', () => {
     rows = [];
     renderTable();
     $('#status') && ($('#status').textContent = i18n[lang].uiNoData);
@@ -537,14 +573,17 @@
     if (e.key === 'Enter') doFetch();
   });
 
-  detectPrefix().catch(()=>{});
+  detectPrefix().catch(() => {});
 
   (async () => {
     try {
-      const r = await fetch(buildApi('/health'), { mode: 'cors' });
-      if (!r.ok) throw 0;
-      console.log('[health ok]');
-    } catch(e) {
+      const r = await fetch(buildApi('/health'), {
+        mode: 'cors',
+        headers: { ...AUTH_HEADERS },
+      });
+      if (!r.ok && r.status !== 401) throw 0;
+      console.log('[health ok or reachable]', r.status);
+    } catch (e) {
       console.warn('[health failed]', e);
     }
   })();
