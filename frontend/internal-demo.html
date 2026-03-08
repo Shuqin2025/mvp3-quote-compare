@@ -18,7 +18,7 @@
     })();
   </script>
 
-  <link rel="stylesheet" href="./public/ui-enhance.css" />
+  <link rel="stylesheet" href="./ui-enhance.css" />
 
   <style>
     :root {
@@ -148,9 +148,9 @@
       font-size: 16px;
     }
 
-    #btnFetch,
-    #btnExport,
-    #btnClear {
+    #fetchBtn,
+    #exportBtn,
+    #clearBtn {
       height: 50px;
       padding: 0 18px;
       border-radius: 12px;
@@ -159,25 +159,25 @@
       white-space: nowrap;
     }
 
-    #btnFetch {
+    #fetchBtn {
       background: var(--blue);
       color: #fff;
       border: none;
       font-weight: 700;
     }
 
-    #btnFetch:hover { background: var(--blue-hover); }
+    #fetchBtn:hover { background: var(--blue-hover); }
 
-    #btnExport,
-    #btnClear {
+    #exportBtn,
+    #clearBtn {
       background: #fff;
       color: #111827;
       border: 1px solid var(--line);
       font-weight: 600;
     }
 
-    #btnExport:hover,
-    #btnClear:hover {
+    #exportBtn:hover,
+    #clearBtn:hover {
       background: #f8fafc;
     }
 
@@ -278,9 +278,9 @@
         grid-template-columns: 1fr;
       }
 
-      #btnFetch,
-      #btnExport,
-      #btnClear,
+      #fetchBtn,
+      #exportBtn,
+      #clearBtn,
       #limit,
       #url {
         width: 100%;
@@ -327,13 +327,13 @@
             <option value="200">200</option>
           </select>
 
-          <button id="btnFetch" type="button">Fetch Catalog</button>
-          <button id="btnExport" type="button">Export Excel (.xlsx)</button>
+          <button id="fetchBtn" type="button">Fetch Catalog</button>
+          <button id="exportBtn" type="button">Export Excel (.xlsx)</button>
         </div>
 
         <div class="control-row" style="grid-template-columns: 1fr auto; margin-top: 10px;">
           <div id="status">ui_no_data</div>
-          <button id="btnClear" type="button">Clear</button>
+          <button id="clearBtn" type="button">Clear</button>
         </div>
 
         <div id="okbar" aria-live="polite"></div>
@@ -366,10 +366,13 @@
   </div>
 
   <script>
-    window.__API_BASE__ = new URLSearchParams(location.search).get('api') || 'https://yunivera-gateway.onrender.com';
+    window.__API_BASE__ =
+      new URLSearchParams(location.search).get('api') ||
+      document.querySelector('meta[name="api-base"]')?.content ||
+      'https://yunivera-gateway.onrender.com';
   </script>
 
-  <script src="./public/export-xlsx.js"></script>
-  <script src="./public/app-simple.js"></script>
+  <script src="./export-xlsx.js"></script>
+  <script src="./app-simple.js"></script>
 </body>
 </html>
